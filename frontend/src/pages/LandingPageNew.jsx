@@ -21,12 +21,14 @@ import {
   Star,
   Quote,
   LogOut,
+  Sun,
+  Moon,
 } from "lucide-react";
 
 // Logo Component
 const Logo = ({ className }) => {
   return (
-    <span className={cn("text-2xl font-bold text-white", className)}>
+    <span className={cn("text-2xl font-bold text-gray-900 dark:text-white", className)}>
       StudyPDF
     </span>
   );
@@ -78,6 +80,32 @@ const HeroHeader = () => {
   const { user, signOut } = useAuth();
   const [menuState, setMenuState] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  
+  // Theme state
+  const [theme, setTheme] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('theme');
+      if (stored === 'light' || stored === 'dark') return stored;
+      const isDark = document.documentElement.classList.contains('dark');
+      return isDark ? 'dark' : 'light';
+    }
+    return 'dark';
+  });
+
+  // Sync theme to DOM and localStorage
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  };
 
   useEffect(() => {
     const handleScroll = () => {
@@ -112,7 +140,7 @@ const HeroHeader = () => {
           className={cn(
             "mx-auto mt-2 max-w-6xl px-6 transition-all duration-300 lg:px-12",
             isScrolled &&
-              "bg-zinc-900/80 max-w-4xl rounded-2xl border border-zinc-800 backdrop-blur-lg lg:px-5 shadow-lg"
+              "bg-white/90 dark:bg-black/90 max-w-4xl rounded-2xl border border-gray-200 dark:border-zinc-800 backdrop-blur-lg lg:px-5 shadow-lg"
           )}
         >
           <div className="relative flex flex-wrap items-center justify-between gap-6 py-3 lg:gap-0 lg:py-4">
@@ -138,7 +166,7 @@ const HeroHeader = () => {
                     <a
                       href={item.href}
                       onClick={(e) => handleNavClick(e, item.href)}
-                      className="text-gray-400 hover:text-white block duration-150 cursor-pointer"
+                      className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white block duration-150 cursor-pointer"
                     >
                       <span>{item.name}</span>
                     </a>
@@ -147,7 +175,7 @@ const HeroHeader = () => {
               </ul>
             </div>
 
-            <div className="bg-zinc-900 group-data-[state=active]:block lg:group-data-[state=active]:flex mb-6 hidden w-full flex-wrap items-center justify-end space-y-8 rounded-3xl border border-zinc-800 p-6 shadow-2xl md:flex-nowrap lg:m-0 lg:flex lg:w-fit lg:gap-6 lg:space-y-0 lg:border-transparent lg:bg-transparent lg:p-0 lg:shadow-none">
+            <div className="bg-white dark:bg-zinc-900 group-data-[state=active]:block lg:group-data-[state=active]:flex mb-6 hidden w-full flex-wrap items-center justify-end space-y-8 rounded-3xl border border-gray-200 dark:border-zinc-800 p-6 shadow-2xl md:flex-nowrap lg:m-0 lg:flex lg:w-fit lg:gap-6 lg:space-y-0 lg:border-0 lg:bg-transparent dark:lg:bg-transparent lg:p-0 lg:shadow-none">
               <div className="lg:hidden">
                 <ul className="space-y-6 text-base">
                   {menuItems.map((item, index) => (
@@ -155,7 +183,7 @@ const HeroHeader = () => {
                       <a
                         href={item.href}
                         onClick={(e) => { handleNavClick(e, item.href); setMenuState(false); }}
-                        className="text-gray-400 hover:text-white block duration-150 cursor-pointer"
+                        className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white block duration-150 cursor-pointer"
                       >
                         <span>{item.name}</span>
                       </a>
@@ -163,13 +191,23 @@ const HeroHeader = () => {
                   ))}
                 </ul>
               </div>
-              <div className="flex w-full flex-col space-y-3 sm:flex-row sm:gap-3 sm:space-y-0 md:w-fit">
+              <div className="flex w-full flex-col space-y-3 sm:flex-row sm:gap-3 sm:space-y-0 md:w-fit items-center">
+                {/* Theme Toggle Button */}
+                <button
+                  onClick={toggleTheme}
+                  className="p-2 rounded-lg border border-gray-300 dark:border-zinc-700 !bg-transparent text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
+                  title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                  style={{ backgroundColor: 'transparent !important' }}
+                >
+                  {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                </button>
+                
                 {user ? (
                   <div className="flex gap-3">
                     <button
                       onClick={() => navigate('/dashboard')}
                       className={cn(
-                        "px-4 py-2 text-sm font-medium rounded-lg bg-white text-black hover:bg-gray-100 transition-all",
+                        "px-4 py-2 text-sm font-medium rounded-lg bg-white dark:bg-white text-black hover:bg-gray-100 transition-all",
                         isScrolled && "lg:inline-flex"
                       )}
                     >
@@ -181,7 +219,7 @@ const HeroHeader = () => {
                         navigate('/');
                       }}
                       className={cn(
-                        "px-4 py-2 text-sm font-medium rounded-lg border border-zinc-700 text-white hover:bg-zinc-800 hover:text-red-400 transition-all flex items-center justify-center gap-2",
+                        "px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-zinc-700 bg-transparent dark:bg-transparent text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-zinc-800 hover:text-red-500 dark:hover:text-red-400 transition-all flex items-center justify-center gap-2",
                         isScrolled && "lg:inline-flex"
                       )}
                       title="Logout"
@@ -195,16 +233,17 @@ const HeroHeader = () => {
                     <button
                       onClick={() => navigate('/login')}
                       className={cn(
-                        "px-4 py-2 text-sm font-medium rounded-lg border border-zinc-700 text-white hover:bg-zinc-800 transition-colors",
-                        isScrolled && "lg:hidden"
+                        "px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-zinc-700 !bg-transparent text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors",
+                        isScrolled && "lg:inline-flex"
                       )}
+                      style={{ backgroundColor: 'transparent !important' }}
                     >
                       Login
                     </button>
                     <button
                       onClick={() => navigate('/register')}
                       className={cn(
-                        "px-4 py-2 text-sm font-medium rounded-lg bg-white text-black hover:bg-gray-100 transition-all",
+                        "px-4 py-2 text-sm font-medium rounded-lg bg-white dark:bg-white text-black hover:bg-gray-100 transition-all",
                         isScrolled ? "lg:inline-flex" : "lg:inline-flex"
                       )}
                     >
@@ -225,7 +264,7 @@ const HeroHeader = () => {
 const Card = ({ className, children, ...props }) => (
   <div
     className={cn(
-      "rounded-lg border border-zinc-800 bg-zinc-900 text-white shadow-sm",
+      "rounded-lg border border-gray-200 dark:border-zinc-800 bg-white dark:bg-black text-gray-900 dark:text-white shadow-sm",
       className
     )}
     {...props}
@@ -283,10 +322,10 @@ function LandingPageNew() {
               {/* Title and Description */}
               <AnimatedGroup variants={transitionVariants}>
                 <div className="text-center mb-16">
-                  <h1 className="max-w-4xl mx-auto text-balance text-5xl md:text-6xl lg:text-7xl font-bold text-white leading-tight">
+                  <h1 className="max-w-4xl mx-auto text-balance text-5xl md:text-6xl lg:text-7xl font-bold text-gray-900 dark:text-white leading-tight">
                     Transform Your Learning with AI-Powered PDFs
                   </h1>
-                  <p className="mx-auto mt-6 max-w-2xl text-balance text-lg text-gray-400">
+                  <p className="mx-auto mt-6 max-w-2xl text-balance text-lg text-gray-600 dark:text-gray-400">
                     Upload any PDF and let our AI create summaries, generate quizzes, and
                     enable collaborative learning. The future of education is here.
                   </p>
@@ -309,17 +348,17 @@ function LandingPageNew() {
               >
                 <div className="max-w-4xl mx-auto">
                   {/* Upload Card */}
-                  <div className="bg-gradient-to-br from-zinc-900 to-zinc-950 rounded-3xl border border-zinc-800 p-8 md:p-12 shadow-2xl">
+                  <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-gray-200 dark:border-zinc-800 p-8 md:p-12 shadow-2xl">
                     {/* Upload Area */}
-                    <div className="bg-gradient-to-br from-blue-950/20 to-purple-950/20 rounded-2xl border-2 border-dashed border-zinc-700 hover:border-blue-500/50 transition-all duration-300 p-12 text-center group cursor-pointer">
+                    <div className="bg-gray-50 dark:bg-zinc-800 rounded-2xl border-2 border-dashed border-gray-300 dark:border-zinc-700 hover:border-blue-500/50 transition-all duration-300 p-12 text-center group cursor-pointer">
                       <div className="flex flex-col items-center space-y-4">
                         <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-500 rounded-2xl flex items-center justify-center transform group-hover:scale-110 transition-transform duration-300">
                           <Upload className="w-10 h-10 text-white" />
                         </div>
                         <div>
-                          <p className="text-xl font-bold text-white mb-2">Upload Your PDF</p>
-                          <p className="text-sm text-gray-400">
-                            Drag and drop or <span className="text-blue-400 font-medium">click to browse</span>
+                          <p className="text-xl font-bold text-gray-900 dark:text-white mb-2">Upload Your PDF</p>
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            Drag and drop or <span className="text-blue-500 dark:text-blue-400 font-medium">click to browse</span>
                           </p>
                           <p className="text-xs text-gray-500 mt-2">
                             Supports PDF files up to 50MB
@@ -331,10 +370,10 @@ function LandingPageNew() {
                     {/* Divider with OR */}
                     <div className="relative my-8">
                       <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-zinc-800"></div>
+                        <div className="w-full border-t border-gray-200 dark:border-zinc-800"></div>
                       </div>
                       <div className="relative flex justify-center text-sm">
-                        <span className="px-4 bg-zinc-900 text-gray-500 font-medium">
+                        <span className="px-4 bg-white dark:bg-zinc-900 text-gray-500 font-medium">
                           Or get started
                         </span>
                       </div>
@@ -344,7 +383,7 @@ function LandingPageNew() {
                     <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
                       <button
                         onClick={() => navigate('/register')}
-                        className="w-full sm:w-auto group relative overflow-hidden px-8 py-4 rounded-xl bg-white text-black font-semibold hover:bg-gray-100 transition-all shadow-lg hover:shadow-xl"
+                        className="w-full sm:w-auto group relative overflow-hidden px-8 py-4 rounded-xl bg-gray-900 dark:bg-white text-white dark:text-black font-semibold hover:bg-gray-800 dark:hover:bg-gray-100 transition-all shadow-lg hover:shadow-xl"
                       >
                         <span className="flex items-center justify-center gap-2">
                           Start Learning Free
@@ -353,14 +392,14 @@ function LandingPageNew() {
                       </button>
                       <button
                         onClick={() => navigate('/login')}
-                        className="w-full sm:w-auto px-8 py-4 rounded-xl border-2 border-zinc-700 text-white font-semibold hover:bg-zinc-800 hover:border-zinc-600 transition-all"
+                        className="w-full sm:w-auto px-8 py-4 rounded-xl border-2 border-gray-300 dark:border-zinc-700 text-gray-900 dark:text-white font-semibold hover:bg-gray-100 dark:hover:bg-zinc-800 hover:border-gray-400 dark:hover:border-zinc-600 transition-all"
                       >
                         Watch Demo
                       </button>
                     </div>
 
                     {/* Trust Indicators */}
-                    <div className="mt-8 pt-8 border-t border-zinc-800">
+                    <div className="mt-8 pt-8 border-t border-gray-200 dark:border-zinc-800">
                       <div className="flex flex-wrap items-center justify-center gap-8 text-sm text-gray-500">
                         <div className="flex items-center gap-2">
                           <svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
@@ -399,10 +438,10 @@ function LandingPageNew() {
               viewport={{ once: true }}
               className="text-center mb-12"
             >
-              <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
+              <h2 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white mb-4">
                 How It Works
               </h2>
-              <p className="text-gray-400 max-w-2xl mx-auto text-lg">
+              <p className="text-gray-600 dark:text-gray-400 max-w-2xl mx-auto text-lg">
                 Transform your PDFs into learning materials in seconds
               </p>
             </motion.div>
@@ -496,7 +535,7 @@ function LandingPageNew() {
                           whileHover={{ scale: 1.02 }}
                           className="flex-1 w-full"
                         >
-                          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 hover:border-zinc-700 transition-all duration-300 relative overflow-hidden group">
+                          <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-gray-300 dark:hover:border-zinc-700 transition-all duration-300 relative overflow-hidden group">
                             {/* Gradient Overlay */}
                             <div className={cn(
                               "absolute top-0 right-0 w-64 h-64 blur-3xl opacity-0 group-hover:opacity-10 transition-opacity duration-500",
@@ -506,8 +545,8 @@ function LandingPageNew() {
                             )} />
 
                             <div className="relative z-10">
-                              <h3 className="text-2xl font-bold text-white mb-2">{step.title}</h3>
-                              <p className="text-gray-400 text-base mb-4 leading-relaxed">
+                              <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">{step.title}</h3>
+                              <p className="text-gray-600 dark:text-gray-400 text-base mb-4 leading-relaxed">
                                 {step.description}
                               </p>
                               
@@ -520,7 +559,7 @@ function LandingPageNew() {
                                     whileInView={{ opacity: 1, scale: 1 }}
                                     transition={{ delay: index * 0.15 + i * 0.1 }}
                                     viewport={{ once: true }}
-                                    className="px-2.5 py-1 bg-zinc-800 text-gray-400 text-xs rounded-full border border-zinc-700"
+                                    className="px-2.5 py-1 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 text-xs rounded-full border border-gray-200 dark:border-zinc-700"
                                   >
                                     {feature}
                                   </motion.span>
@@ -543,10 +582,10 @@ function LandingPageNew() {
         <section id="features" className="bg-transparent relative z-10 py-12 md:py-20">
           <div className="mx-auto max-w-5xl px-6">
             <div className="text-center mb-12">
-              <h2 className="text-3xl md:text-4xl font-bold mb-4 text-white">
+              <h2 className="text-3xl md:text-4xl font-bold mb-4 text-gray-900 dark:text-white">
                 Powerful AI Features
               </h2>
-              <p className="text-gray-400 max-w-2xl mx-auto">
+              <p className="text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
                 Everything you need to supercharge your learning experience
               </p>
             </div>
@@ -573,7 +612,7 @@ function LandingPageNew() {
                         </motion.div>
                         <p className="font-medium text-lg">PDF Summarization</p>
                       </div>
-                      <p className="text-gray-400 mt-3 max-w-sm text-sm">
+                      <p className="text-gray-600 dark:text-gray-400 mt-3 max-w-sm text-sm">
                         Our AI instantly analyzes and summarizes lengthy PDFs into
                         digestible key points, saving you hours of reading time.
                       </p>
@@ -582,7 +621,7 @@ function LandingPageNew() {
 
                   <CardContent className="relative h-fit px-6 pb-6 md:px-12 md:pb-12">
                     <motion.div 
-                      className="bg-gradient-to-br from-blue-950/30 to-zinc-900 p-6 rounded-lg border border-zinc-800 mb-6"
+                      className="bg-gray-100 dark:bg-zinc-950 p-6 rounded-lg border border-gray-200 dark:border-zinc-800 mb-6"
                       whileHover={{ scale: 1.02 }}
                       transition={{ type: "spring", stiffness: 300 }}
                     >
@@ -603,7 +642,7 @@ function LandingPageNew() {
                           transition={{ duration: 1, delay: 0.9 }}
                         />
                       </div>
-                      <div className="flex items-center justify-between pt-4 border-t border-zinc-800">
+                      <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-zinc-800">
                         <span className="text-xs text-gray-500">Processing time: ~2 seconds</span>
                         <span className="text-xs text-blue-400 font-medium">95% accuracy</span>
                       </div>
@@ -611,21 +650,21 @@ function LandingPageNew() {
                     
                     <div className="grid grid-cols-3 gap-4">
                       <motion.div 
-                        className="text-center p-3 bg-zinc-900 rounded-lg border border-zinc-800"
+                        className="text-center p-3 bg-gray-100 dark:bg-zinc-950 rounded-lg border border-gray-200 dark:border-zinc-800"
                         whileHover={{ y: -2 }}
                       >
-                        <div className="text-2xl font-bold text-blue-400 mb-1">50K+</div>
+                        <div className="text-2xl font-bold text-blue-500 dark:text-blue-400 mb-1">50K+</div>
                         <div className="text-xs text-gray-500">PDFs Processed</div>
                       </motion.div>
                       <motion.div 
-                        className="text-center p-3 bg-zinc-900 rounded-lg border border-zinc-800"
+                        className="text-center p-3 bg-gray-100 dark:bg-zinc-950 rounded-lg border border-gray-200 dark:border-zinc-800"
                         whileHover={{ y: -2 }}
                       >
-                        <div className="text-2xl font-bold text-blue-400 mb-1">10+</div>
+                        <div className="text-2xl font-bold text-blue-500 dark:text-blue-400 mb-1">10+</div>
                         <div className="text-xs text-gray-500">Languages</div>
                       </motion.div>
                       <motion.div 
-                        className="text-center p-3 bg-zinc-900 rounded-lg border border-zinc-800"
+                        className="text-center p-3 bg-gray-100 dark:bg-zinc-950 rounded-lg border border-gray-200 dark:border-zinc-800"
                         whileHover={{ y: -2 }}
                       >
                         <div className="text-2xl font-bold text-blue-400 mb-1">50MB</div>
@@ -652,7 +691,7 @@ function LandingPageNew() {
                   <CardContent className="mt-auto h-fit px-6 pb-6">
                     <div className="relative">
                       <motion.div 
-                        className="rounded-lg border border-zinc-800 bg-gradient-to-br from-purple-950/30 to-zinc-900 p-6 mb-4"
+                        className="rounded-lg border border-gray-200 dark:border-zinc-800 bg-gray-100 dark:bg-zinc-950 p-6 mb-4"
                         whileHover={{ scale: 1.02 }}
                         transition={{ type: "spring", stiffness: 300 }}
                       >
@@ -667,7 +706,7 @@ function LandingPageNew() {
                         </div>
                         <div className="space-y-3 mb-6">
                           <motion.div 
-                            className="bg-zinc-800 p-3 rounded-lg border border-zinc-700"
+                            className="bg-gray-200 dark:bg-zinc-800 p-3 rounded-lg border border-gray-300 dark:border-zinc-700"
                             whileHover={{ y: -2 }}
                             transition={{ type: "spring", stiffness: 400 }}
                           >
@@ -675,7 +714,7 @@ function LandingPageNew() {
                             <div className="h-2 bg-purple-500/50 rounded w-3/4"></div>
                           </motion.div>
                           <motion.div 
-                            className="bg-zinc-800 p-3 rounded-lg border border-zinc-700"
+                            className="bg-gray-200 dark:bg-zinc-800 p-3 rounded-lg border border-gray-300 dark:border-zinc-700"
                             whileHover={{ y: -2 }}
                             transition={{ type: "spring", stiffness: 400 }}
                           >
@@ -683,7 +722,7 @@ function LandingPageNew() {
                             <div className="h-2 bg-purple-500/30 rounded w-2/3"></div>
                           </motion.div>
                         </div>
-                        <div className="flex items-center justify-between pt-4 border-t border-zinc-800">
+                        <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-zinc-800">
                           <span className="text-xs text-gray-500">Auto-generated</span>
                           <span className="text-xs text-purple-400 font-medium">Multiple choice</span>
                         </div>
@@ -691,14 +730,14 @@ function LandingPageNew() {
                       
                       <div className="grid grid-cols-2 gap-3">
                         <motion.div 
-                          className="p-3 bg-zinc-900 rounded-lg border border-zinc-800 text-center"
+                          className="p-3 bg-gray-100 dark:bg-zinc-950 rounded-lg border border-gray-200 dark:border-zinc-800 text-center"
                           whileHover={{ scale: 1.05 }}
                         >
                           <div className="text-lg font-bold text-purple-400 mb-1">3</div>
                           <div className="text-xs text-gray-500">Difficulty Levels</div>
                         </motion.div>
                         <motion.div 
-                          className="p-3 bg-zinc-900 rounded-lg border border-zinc-800 text-center"
+                          className="p-3 bg-gray-100 dark:bg-zinc-950 rounded-lg border border-gray-200 dark:border-zinc-800 text-center"
                           whileHover={{ scale: 1.05 }}
                         >
                           <div className="text-lg font-bold text-purple-400 mb-1">∞</div>
@@ -729,7 +768,7 @@ function LandingPageNew() {
                     </motion.div>
                     <p className="text-lg font-semibold">Collaboration</p>
                   </div>
-                  <p className="text-gray-400 mb-8 text-sm">
+                  <p className="text-gray-600 dark:text-gray-400 mb-8 text-sm">
                     Share documents, notes, and quizzes with your study group in real-time.
                   </p>
 
@@ -773,14 +812,14 @@ function LandingPageNew() {
                       </motion.div>
                       <p className="font-medium text-lg">AI Chat Assistant</p>
                     </div>
-                    <p className="text-gray-400 mt-2 max-w-sm text-sm">
+                    <p className="text-gray-600 dark:text-gray-400 mt-2 max-w-sm text-sm">
                       Ask questions about your documents and get instant, intelligent
                       responses powered by advanced AI.
                     </p>
                   </CardHeader>
                   <CardContent className="relative h-fit px-6 pb-6 md:px-12 md:pb-12">
                     <motion.div 
-                      className="bg-gradient-to-br from-orange-950/30 to-zinc-900 p-6 rounded-lg border border-zinc-800"
+                      className="bg-gray-100 dark:bg-zinc-950 p-6 rounded-lg border border-gray-200 dark:border-zinc-800"
                       whileHover={{ scale: 1.02 }}
                       transition={{ type: "spring", stiffness: 300 }}
                     >
@@ -828,10 +867,10 @@ function LandingPageNew() {
               viewport={{ once: true }}
               className="text-center mb-16"
             >
-              <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
+              <h2 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white mb-4">
                 Loved by Students Worldwide
               </h2>
-              <p className="text-gray-400 max-w-2xl mx-auto text-lg">
+              <p className="text-gray-600 dark:text-gray-400 max-w-2xl mx-auto text-lg">
                 See what our users have to say about transforming their learning experience
               </p>
             </motion.div>
@@ -877,9 +916,9 @@ function LandingPageNew() {
                   whileHover={{ y: -5 }}
                   className="relative group"
                 >
-                  <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 h-full relative overflow-hidden hover:border-zinc-700 transition-all duration-300">
+                  <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-8 h-full relative overflow-hidden hover:border-gray-300 dark:hover:border-zinc-700 transition-all duration-300">
                     {/* Quote Icon */}
-                    <Quote className="absolute top-6 right-6 w-12 h-12 text-zinc-800 opacity-50" />
+                    <Quote className="absolute top-6 right-6 w-12 h-12 text-gray-300 dark:text-zinc-800 opacity-50" />
                     
                     {/* Rating Stars */}
                     <div className="flex gap-1 mb-4">
@@ -902,7 +941,7 @@ function LandingPageNew() {
                     </div>
 
                     {/* Content */}
-                    <p className="text-gray-300 mb-6 leading-relaxed relative z-10">
+                    <p className="text-gray-700 dark:text-gray-300 mb-6 leading-relaxed relative z-10">
                       "{testimonial.content}"
                     </p>
 
@@ -920,7 +959,7 @@ function LandingPageNew() {
                         {testimonial.avatar}
                       </motion.div>
                       <div>
-                        <div className="font-semibold text-white">{testimonial.name}</div>
+                        <div className="font-semibold text-gray-900 dark:text-white">{testimonial.name}</div>
                         <div className="text-sm text-gray-500">{testimonial.role}</div>
                       </div>
                     </div>
@@ -955,7 +994,7 @@ function LandingPageNew() {
                   <motion.div
                     key={index}
                     whileHover={{ scale: 1.05 }}
-                    className="flex items-center gap-2 text-gray-400"
+                    className="flex items-center gap-2 text-gray-600 dark:text-gray-400"
                   >
                     <BadgeIcon className="w-5 h-5" />
                     <span className="text-sm font-medium">{badge.text}</span>
@@ -969,10 +1008,10 @@ function LandingPageNew() {
         {/* Final CTA Section */}
         <section id="features" className="bg-transparent relative z-10 py-12 md:py-20">
           <div className="mx-auto max-w-4xl px-6 text-center">
-            <h2 className="text-3xl md:text-5xl font-bold mb-6 text-white">
+            <h2 className="text-3xl md:text-5xl font-bold mb-6 text-gray-900 dark:text-white">
               Ready to Transform Your Learning?
             </h2>
-            <p className="text-lg text-gray-400 mb-8 max-w-2xl mx-auto">
+            <p className="text-lg text-gray-600 dark:text-gray-400 mb-8 max-w-2xl mx-auto">
               Join thousands of students and professionals who are already learning
               smarter with AI-powered tools.
             </p>
@@ -999,7 +1038,7 @@ function LandingPageNew() {
                   </button>
                   <button
                     onClick={() => navigate('/login')}
-                    className="px-8 py-3 rounded-lg border-2 border-zinc-700 text-white font-semibold hover:bg-zinc-800 transition-colors"
+                    className="px-8 py-3 rounded-lg border-2 border-gray-300 dark:border-zinc-700 text-gray-900 dark:text-white font-semibold hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
                   >
                     Login to Your Account
                   </button>

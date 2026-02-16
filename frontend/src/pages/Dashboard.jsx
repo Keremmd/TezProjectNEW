@@ -27,7 +27,12 @@ import {
   Lock,
   ChevronLeft,
   ChevronRight,
-  Trash2
+  Trash2,
+  Sun,
+  Moon,
+  MessageCircle,
+  ImagePlus,
+  Send
 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -79,6 +84,32 @@ const Dashboard = () => {
   const [sharedView, setSharedView] = useState('pdfs'); // 'pdfs' | 'quizzes'
   const [deleteQuizModalOpen, setDeleteQuizModalOpen] = useState(false);
   const [quizToDelete, setQuizToDelete] = useState(null);
+
+  // Theme: 'light' | 'dark' (uyum için html class ile senkron)
+  const [theme, setTheme] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('theme');
+      if (stored === 'light' || stored === 'dark') return stored;
+      const isDark = document.documentElement.classList.contains('dark');
+      return isDark ? 'dark' : 'light';
+    }
+    return 'dark';
+  });
+
+  // Community (photo Q&A)
+  const [communityPosts, setCommunityPosts] = useState([]);
+  const [communityLoading, setCommunityLoading] = useState(false);
+  const [communityPostModalOpen, setCommunityPostModalOpen] = useState(false);
+  const [communityNewPost, setCommunityNewPost] = useState({ imageFile: null, caption: '', courseName: '' });
+  const [communityPosting, setCommunityPosting] = useState(false);
+  const [selectedCommunityPost, setSelectedCommunityPost] = useState(null);
+  const [communityComments, setCommunityComments] = useState([]);
+  const [newCommentText, setNewCommentText] = useState('');
+  const [submittingComment, setSubmittingComment] = useState(false);
+  const [communityFilterCourse, setCommunityFilterCourse] = useState('');
+  const [deleteCommunityPostModalOpen, setDeleteCommunityPostModalOpen] = useState(false);
+  const [communityPostToDelete, setCommunityPostToDelete] = useState(null);
+  const [deletingCommunityPost, setDeletingCommunityPost] = useState(false);
   
   // Quiz states
   const [quizzes, setQuizzes] = useState([]);
@@ -103,6 +134,17 @@ const Dashboard = () => {
       });
     }
   }, [user]);
+
+  // Sync theme to DOM and localStorage
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+    localStorage.setItem('theme', theme);
+  }, [theme]);
 
   // Load user PDFs
   const loadUserPDFs = async () => {
@@ -379,6 +421,183 @@ const Dashboard = () => {
     }
   };
 
+  // Load community posts
+  const loadCommunityPosts = async () => {
+    setCommunityLoading(true);
+    try {
+      let query = supabase
+        .from('community_posts')
+        .select('*');
+      
+      // Apply course name filter if provided
+      if (communityFilterCourse.trim()) {
+        query = query.ilike('course_name', `%${communityFilterCourse.trim()}%`);
+      }
+      
+      const { data, error } = await query.order('created_at', { ascending: false });
+      if (error) throw error;
+      setCommunityPosts(data || []);
+    } catch (err) {
+      console.error('Error loading community posts:', err);
+      setCommunityPosts([]);
+    } finally {
+      setCommunityLoading(false);
+    }
+  };
+
+  const loadCommunityComments = async (postId) => {
+    if (!postId) return;
+    try {
+      const { data, error } = await supabase
+        .from('community_comments')
+        .select('*')
+        .eq('post_id', postId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setCommunityComments(data || []);
+    } catch (err) {
+      console.error('Error loading comments:', err);
+      setCommunityComments([]);
+    }
+  };
+
+  const submitCommunityPost = async () => {
+    if (!user || !communityNewPost.imageFile) return;
+    setCommunityPosting(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      if (!userId) {
+        alert('Oturum bulunamadı. Lütfen tekrar giriş yapın.');
+        setCommunityPosting(false);
+        return;
+      }
+      const ext = communityNewPost.imageFile.name.split('.').pop() || 'jpg';
+      const path = `${userId}/${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from('community')
+        .upload(path, communityNewPost.imageFile, { upsert: false });
+      if (uploadError) throw uploadError;
+      const { data: urlData } = supabase.storage.from('community').getPublicUrl(path);
+      const authorName = [user.user_metadata?.first_name, user.user_metadata?.last_name].filter(Boolean).join(' ') || 'Kullanıcı';
+      // RLS bypass için Supabase RPC fonksiyonu kullanılıyor (auth.uid() fonksiyon içinde kontrol ediliyor)
+      const { error: insertError } = await supabase.rpc('insert_community_post', {
+        p_image_url: urlData.publicUrl,
+        p_caption: communityNewPost.caption || null,
+        p_author_name: authorName,
+        p_course_name: communityNewPost.courseName || null
+      });
+      if (insertError) throw insertError;
+      setCommunityPostModalOpen(false);
+      setCommunityNewPost({ imageFile: null, caption: '', courseName: '' });
+      loadCommunityPosts();
+    } catch (err) {
+      console.error('Error creating community post:', err);
+      alert(err.message || 'Gönderi yüklenemedi. Storage bucket "community" oluşturulmuş mu kontrol edin.');
+    } finally {
+      setCommunityPosting(false);
+    }
+  };
+
+  const submitCommunityComment = async () => {
+    if (!user || !selectedCommunityPost || !newCommentText.trim()) return;
+    setSubmittingComment(true);
+    try {
+      const authorName = [user.user_metadata?.first_name, user.user_metadata?.last_name].filter(Boolean).join(' ') || 'Kullanıcı';
+      const { error } = await supabase
+        .from('community_comments')
+        .insert({
+          post_id: selectedCommunityPost.id,
+          user_id: user.id,
+          content: newCommentText.trim(),
+          author_name: authorName
+        });
+      if (error) throw error;
+      setNewCommentText('');
+      loadCommunityComments(selectedCommunityPost.id);
+    } catch (err) {
+      console.error('Error adding comment:', err);
+      alert('Yorum eklenemedi.');
+    } finally {
+      setSubmittingComment(false);
+    }
+  };
+
+  const openCommunityPostDetail = (post) => {
+    setSelectedCommunityPost(post);
+    loadCommunityComments(post.id);
+  };
+
+  // Delete community post
+  const handleDeleteCommunityPost = (post, e) => {
+    e?.stopPropagation(); // Prevent opening the detail modal
+    // Close detail modal if it's open (to prevent z-index issues)
+    if (selectedCommunityPost) {
+      setSelectedCommunityPost(null);
+      setCommunityComments([]);
+      setNewCommentText('');
+    }
+    // Close new post modal if it's open
+    if (communityPostModalOpen) {
+      setCommunityPostModalOpen(false);
+    }
+    setCommunityPostToDelete(post);
+    setDeleteCommunityPostModalOpen(true);
+  };
+
+  const confirmDeleteCommunityPost = async () => {
+    if (!communityPostToDelete || !user) return;
+    setDeletingCommunityPost(true);
+    try {
+      // Extract file path from image_url
+      // URL format: https://...supabase.co/storage/v1/object/public/community/{userId}/{filename}
+      const imageUrl = communityPostToDelete.image_url;
+      const urlParts = imageUrl.split('/community/');
+      if (urlParts.length > 1) {
+        const filePath = urlParts[1];
+        // Delete from storage
+        const { error: storageError } = await supabase.storage
+          .from('community')
+          .remove([filePath]);
+        if (storageError) {
+          console.error('Storage delete error:', storageError);
+          // Continue with database delete even if storage delete fails
+        }
+      }
+
+      // Delete comments first (cascade should handle this, but let's be explicit)
+      await supabase
+        .from('community_comments')
+        .delete()
+        .eq('post_id', communityPostToDelete.id);
+
+      // Delete from database
+      const { error: dbError } = await supabase
+        .from('community_posts')
+        .delete()
+        .eq('id', communityPostToDelete.id)
+        .eq('user_id', user.id); // Ensure user can only delete their own posts
+
+      if (dbError) throw dbError;
+
+      // Close detail modal if the deleted post is currently open
+      if (selectedCommunityPost?.id === communityPostToDelete.id) {
+        setSelectedCommunityPost(null);
+        setCommunityComments([]);
+      }
+
+      // Reload posts
+      loadCommunityPosts();
+      setDeleteCommunityPostModalOpen(false);
+      setCommunityPostToDelete(null);
+    } catch (err) {
+      console.error('Error deleting community post:', err);
+      alert(err.message || 'Gönderi silinemedi.');
+    } finally {
+      setDeletingCommunityPost(false);
+    }
+  };
+
   // Load PDFs, Courses, Quizzes, last scores and Public content when user changes
   useEffect(() => {
     if (user) {
@@ -388,8 +607,24 @@ const Dashboard = () => {
       loadPublicQuizzes();
       loadUserQuizzes();
       loadLastScores();
+      loadCommunityPosts();
     }
   }, [user]);
+
+  // Load community posts when section changes
+  useEffect(() => {
+    if (activeSection === 'community') loadCommunityPosts();
+  }, [activeSection]);
+
+  // Load community posts when filter changes (with debounce)
+  useEffect(() => {
+    if (activeSection === 'community' && communityFilterCourse !== undefined) {
+      const timeoutId = setTimeout(() => {
+        loadCommunityPosts();
+      }, 300); // 300ms debounce for filter changes
+      return () => clearTimeout(timeoutId);
+    }
+  }, [communityFilterCourse]);
 
   // Toggle PDF status
   const handleStatusToggle = async (pdfId, currentStatus) => {
@@ -816,6 +1051,7 @@ const Dashboard = () => {
     { id: 'courses', icon: BookOpen, label: 'My Courses' },
     { id: 'quizzes', icon: Brain, label: 'My Quizzes' },
     { id: 'shared', icon: Share2, label: 'Shared Content' },
+    { id: 'community', icon: MessageCircle, label: 'Community' },
     { id: 'settings', icon: Settings, label: 'Settings' },
   ];
 
@@ -968,21 +1204,21 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-black flex">
+    <div className="min-h-screen bg-gray-100 dark:bg-black flex">
       {/* Sidebar */}
       <motion.aside
         initial={{ x: -300 }}
         animate={{ x: 0, width: sidebarCollapsed ? '5rem' : '16rem' }}
         transition={{ duration: 0.3 }}
-        className={`fixed lg:static inset-y-0 left-0 z-50 bg-zinc-900 border-r border-zinc-800 transform ${
+        className={`fixed lg:static inset-y-0 left-0 z-50 bg-white dark:bg-zinc-900 border-r border-gray-200 dark:border-zinc-800 transform ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0 transition-transform duration-300`}
       >
         <div className="flex flex-col h-full">
           {/* Logo */}
-          <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'} p-6 border-b border-zinc-800`}>
+          <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'} p-6 border-b border-gray-200 dark:border-zinc-800`}>
             {!sidebarCollapsed && (
-              <span className="text-2xl font-bold text-white">StudyPDF</span>
+              <span className="text-2xl font-bold text-gray-900 dark:text-white">StudyPDF</span>
             )}
             <button
               onClick={() => {
@@ -992,7 +1228,7 @@ const Dashboard = () => {
                   setSidebarOpen(false);
                 }
               }}
-              className="text-gray-400 hover:text-white transition-colors"
+              className="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
             >
               {window.innerWidth >= 1024 ? (
                 sidebarCollapsed ? (
@@ -1022,8 +1258,8 @@ const Dashboard = () => {
                     sidebarCollapsed ? 'justify-center' : 'space-x-3'
                   } px-4 py-3 rounded-lg transition-colors ${
                     activeSection === item.id
-                      ? 'bg-white text-black'
-                      : 'text-gray-400 hover:text-white hover:bg-zinc-800'
+                      ? 'bg-blue-500 text-white dark:bg-white dark:text-black'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-zinc-800'
                   }`}
                   title={sidebarCollapsed ? item.label : ''}
                 >
@@ -1037,12 +1273,12 @@ const Dashboard = () => {
           </nav>
 
           {/* Bottom actions */}
-          <div className="p-4 border-t border-zinc-800">
+          <div className="p-4 border-t border-gray-200 dark:border-zinc-800">
             <button 
               onClick={handleLogout}
               className={`w-full flex items-center ${
                 sidebarCollapsed ? 'justify-center' : 'space-x-3'
-              } px-4 py-3 text-gray-400 hover:text-red-400 hover:bg-zinc-800 rounded-lg transition-colors`}
+              } px-4 py-3 text-gray-600 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded-lg transition-colors`}
               title={sidebarCollapsed ? 'Logout' : ''}
             >
               <LogOut className="w-5 h-5 flex-shrink-0" />
@@ -1057,47 +1293,56 @@ const Dashboard = () => {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-h-screen">
         {/* Top Bar */}
-        <header className="bg-zinc-900 border-b border-zinc-800 sticky top-0 z-40">
+        <header className="bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800 sticky top-0 z-40">
           <div className="flex items-center justify-between px-6 py-4">
             <div className="flex items-center space-x-4">
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="lg:hidden text-gray-400 hover:text-white"
+                className="lg:hidden text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
               >
                 <Menu className="w-6 h-6" />
               </button>
               
               {/* Search */}
-              <div className="hidden md:flex items-center space-x-2 bg-zinc-800 rounded-lg px-4 py-2 w-96">
-                <Search className="w-5 h-5 text-gray-400" />
+              <div className="hidden md:flex items-center space-x-2 bg-gray-100 dark:bg-zinc-800 rounded-lg px-4 py-2 w-96">
+                <Search className="w-5 h-5 text-gray-500 dark:text-gray-400" />
                 <input
                   type="text"
                   placeholder="PDF veya quiz ara..."
-                  className="bg-transparent border-none outline-none text-white placeholder-gray-500 w-full"
+                  className="bg-transparent border-none outline-none text-gray-900 dark:text-white placeholder-gray-500 w-full"
                 />
               </div>
             </div>
 
             <div className="flex items-center space-x-4">
+              {/* Theme toggle */}
+              <button
+                type="button"
+                onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+                className="p-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-zinc-800 hover:text-gray-900 dark:hover:text-white transition-colors"
+                title={theme === 'dark' ? 'Açık tema' : 'Koyu tema'}
+              >
+                {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+              </button>
               <button 
                 onClick={() => {
                   console.log('Home button clicked');
                   navigate('/');
                 }}
-                className="flex items-center space-x-2 px-4 py-2 text-gray-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+                className="flex items-center space-x-2 px-4 py-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
               >
                 <Home className="w-5 h-5" />
                 <span className="text-sm font-medium hidden sm:inline">Home Page</span>
               </button>
               
-              <div className="flex items-center space-x-3 pl-4 border-l border-zinc-800">
+              <div className="flex items-center space-x-3 pl-4 border-l border-gray-200 dark:border-zinc-800">
                 <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
                   <span className="text-white font-bold">
                     {user?.user_metadata?.first_name?.charAt(0).toUpperCase() || 'U'}
                   </span>
                 </div>
                 <div className="hidden md:block">
-                  <p className="text-sm font-medium text-white">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">
                     {user?.user_metadata?.first_name || 'Kullanıcı'}
                   </p>
                 </div>
@@ -1107,15 +1352,15 @@ const Dashboard = () => {
         </header>
 
         {/* Main Content Area */}
-        <main className="flex-1 p-6 overflow-y-auto">
+        <main className="flex-1 p-6 overflow-y-auto bg-transparent">
           {activeSection === 'home' && (
             <div className="space-y-6">
               {/* Welcome Section */}
               <div>
-                <h1 className="text-3xl font-bold text-white mb-2">
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
                   Welcome, {user?.user_metadata?.first_name || 'User'}! 👋
                 </h1>
-                <p className="text-gray-400">
+                <p className="text-gray-600 dark:text-gray-400">
                   Which PDF do you want to learn today?
                 </p>
               </div>
@@ -1128,7 +1373,7 @@ const Dashboard = () => {
                     <motion.div
                       key={index}
                       whileHover={{ y: -4 }}
-                      className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 hover:border-zinc-700 transition-colors"
+                      className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-gray-300 dark:hover:border-zinc-700 transition-colors"
                     >
                       <div className="flex items-center justify-between mb-4">
                         <div className={`w-12 h-12 bg-gradient-to-br ${stat.color} rounded-lg flex items-center justify-center`}>
@@ -1136,8 +1381,8 @@ const Dashboard = () => {
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <p className="text-2xl font-bold text-white">{stat.value}</p>
-                        <p className="text-sm text-gray-400">{stat.label}</p>
+                        <p className="text-2xl font-bold text-gray-900 dark:text-white">{stat.value}</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">{stat.label}</p>
                         <p className="text-xs text-green-400">{stat.change}</p>
                       </div>
                     </motion.div>
@@ -1151,8 +1396,8 @@ const Dashboard = () => {
                 onDragLeave={handleDrag}
                 onDragOver={handleDrag}
                 onDrop={handleDrop}
-                className={`bg-zinc-900 border-2 border-dashed ${
-                  dragActive ? 'border-white bg-zinc-800' : 'border-zinc-700'
+                className={`bg-white dark:bg-zinc-900 border-2 border-dashed ${
+                  dragActive ? 'border-blue-500 bg-blue-500/10 dark:border-white dark:bg-zinc-800' : 'border-gray-300 dark:border-zinc-700'
                 } rounded-xl p-12 text-center transition-all`}
               >
                 <div className="flex flex-col items-center space-y-4">
@@ -1160,13 +1405,13 @@ const Dashboard = () => {
                     <Upload className="w-8 h-8 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold text-white mb-2">
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
                       Upload PDF
                     </h3>
-                    <p className="text-gray-400 mb-4">
+                    <p className="text-gray-600 dark:text-gray-400 mb-4">
                       Drag & drop or click
                     </p>
-                    <label className="px-6 py-3 bg-white text-black rounded-lg font-semibold hover:bg-gray-100 transition-colors cursor-pointer inline-block">
+                    <label className="px-6 py-3 bg-gray-100 dark:bg-white text-gray-900 dark:text-black rounded-lg font-semibold border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors cursor-pointer inline-block">
                       Choose File
                       <input
                         type="file"
@@ -1185,14 +1430,14 @@ const Dashboard = () => {
               {/* Recent PDFs */}
               <div>
                 <div className="mb-4">
-                  <h2 className="text-2xl font-bold text-white">Recent Uploads</h2>
+                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Recent Uploads</h2>
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                   {userPDFs.length > 0 ? userPDFs.slice(0, 3).map((pdf) => (
                     <motion.div
                       key={pdf.id}
                       whileHover={{ y: -4 }}
-                      className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 hover:border-zinc-700 transition-all"
+                      className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-gray-300 dark:hover:border-zinc-700 transition-all"
                     >
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex items-center space-x-3">
@@ -1200,10 +1445,10 @@ const Dashboard = () => {
                             <FileText className="w-5 h-5 text-white" />
                           </div>
                           <div className="flex-1">
-                            <h3 className="text-sm font-semibold text-white mb-1 line-clamp-1">
+                            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1 line-clamp-1">
                               {pdf.file_name}
                             </h3>
-                            <p className="text-xs text-gray-400">
+                            <p className="text-xs text-gray-600 dark:text-gray-400">
                               {pdf.course_name} • {new Date(pdf.created_at).toLocaleDateString()}
                             </p>
                           </div>
@@ -1213,15 +1458,15 @@ const Dashboard = () => {
                       {/* Course Info */}
                       <div className="space-y-2 mb-4">
                         <div className="flex items-center justify-between text-xs">
-                          <span className="text-gray-400">University:</span>
-                          <span className="text-white font-medium">{pdf.university}</span>
+                          <span className="text-gray-500 dark:text-gray-400">University:</span>
+                          <span className="text-gray-900 dark:text-white font-medium">{pdf.university}</span>
                         </div>
                         <div className="flex items-center justify-between text-xs">
-                          <span className="text-gray-400">Grade:</span>
-                          <span className="text-white font-medium">{pdf.grade}</span>
+                          <span className="text-gray-500 dark:text-gray-400">Grade:</span>
+                          <span className="text-gray-900 dark:text-white font-medium">{pdf.grade}</span>
                         </div>
                         <div className="flex items-center justify-between text-xs">
-                          <span className="text-gray-400">Status:</span>
+                          <span className="text-gray-500 dark:text-gray-400">Status:</span>
                           <button
                             onClick={() => handleStatusToggle(pdf.id, pdf.status)}
                             className={`font-medium px-3 py-1 rounded-full transition-all hover:opacity-80 ${
@@ -1239,13 +1484,13 @@ const Dashboard = () => {
                       <div className="flex items-center space-x-2">
                         <button 
                           onClick={() => navigate(`/pdf/${pdf.id}`)}
-                          className="flex-1 px-3 py-2 bg-white text-black text-sm font-medium rounded-lg hover:bg-gray-100 transition-colors"
+                          className="flex-1 px-3 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-sm font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
                         >
                           Open
                         </button>
                         <button 
                           onClick={() => handleDownload(pdf)}
-                          className="p-2 border border-zinc-700 text-gray-400 rounded-lg hover:text-white hover:border-zinc-600 transition-colors"
+                          className="p-2 border-2 border-gray-300 dark:border-zinc-700 text-gray-700 dark:text-gray-400 rounded-lg hover:text-gray-900 dark:hover:text-white hover:border-gray-400 dark:hover:border-zinc-600 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
                           title="Download"
                         >
                           <Download className="w-4 h-4" />
@@ -1254,8 +1499,8 @@ const Dashboard = () => {
                     </motion.div>
                   )) : (
                     <div className="col-span-3 text-center py-12">
-                      <FileText className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-                      <p className="text-gray-400 text-lg">No PDFs uploaded yet</p>
+                      <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                      <p className="text-gray-600 dark:text-gray-400 text-lg">No PDFs uploaded yet</p>
                       <p className="text-gray-500 text-sm mt-2">Upload your first PDF to get started!</p>
                     </div>
                   )}
@@ -1268,8 +1513,8 @@ const Dashboard = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between mb-8">
                 <div>
-                  <h1 className="text-3xl font-bold text-white mb-2">My PDFs</h1>
-                  <p className="text-gray-400">All your uploaded PDF documents</p>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">My PDFs</h1>
+                  <p className="text-gray-600 dark:text-gray-400">All your uploaded PDF documents</p>
                 </div>
                 <button 
                   onClick={() => setUploadModalOpen(true)}
@@ -1282,11 +1527,11 @@ const Dashboard = () => {
 
               {/* PDF Stats */}
               <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs text-gray-400 mb-1">Total PDFs</p>
-                      <p className="text-2xl font-bold text-white">{userPDFs.length}</p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">Total PDFs</p>
+                      <p className="text-2xl font-bold text-gray-900 dark:text-white">{userPDFs.length}</p>
                     </div>
                     <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center">
                       <FileText className="w-5 h-5 text-blue-400" />
@@ -1294,10 +1539,10 @@ const Dashboard = () => {
                   </div>
                 </div>
 
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs text-gray-400 mb-1">In Progress</p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">In Progress</p>
                       <p className="text-2xl font-bold text-yellow-400">
                         {userPDFs.filter(pdf => pdf.status === 'processing').length}
                       </p>
@@ -1308,10 +1553,10 @@ const Dashboard = () => {
                   </div>
                 </div>
 
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs text-gray-400 mb-1">Completed</p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">Completed</p>
                       <p className="text-2xl font-bold text-green-400">
                         {userPDFs.filter(pdf => pdf.status === 'completed').length}
                       </p>
@@ -1328,7 +1573,7 @@ const Dashboard = () => {
                   <motion.div
                     key={pdf.id}
                     whileHover={{ y: -4 }}
-                    className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 hover:border-zinc-700 transition-all"
+                    className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-gray-300 dark:hover:border-zinc-700 transition-all"
                   >
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-center space-x-3 flex-1">
@@ -1336,10 +1581,10 @@ const Dashboard = () => {
                           <FileText className="w-6 h-6 text-white" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h3 className="text-base font-semibold text-white mb-1 truncate">
+                          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-1 truncate">
                             {pdf.file_name}
                           </h3>
-                          <p className="text-xs text-gray-400">
+                          <p className="text-xs text-gray-600 dark:text-gray-400">
                             {new Date(pdf.created_at).toLocaleDateString()}
                           </p>
                         </div>
@@ -1349,25 +1594,25 @@ const Dashboard = () => {
                     {/* PDF Details */}
                     <div className="space-y-2 mb-4">
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-400">Course:</span>
-                        <span className="text-white font-medium">{pdf.course_name}</span>
+                        <span className="text-gray-500 dark:text-gray-400">Course:</span>
+                        <span className="text-gray-900 dark:text-white font-medium">{pdf.course_name}</span>
                       </div>
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-400">University:</span>
-                        <span className="text-white font-medium">{pdf.university}</span>
+                        <span className="text-gray-500 dark:text-gray-400">University:</span>
+                        <span className="text-gray-900 dark:text-white font-medium">{pdf.university}</span>
                       </div>
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-400">Grade:</span>
-                        <span className="text-white font-medium">{pdf.grade}</span>
+                        <span className="text-gray-500 dark:text-gray-400">Grade:</span>
+                        <span className="text-gray-900 dark:text-white font-medium">{pdf.grade}</span>
                       </div>
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-400">Privacy:</span>
-                        <span className={`font-medium ${pdf.privacy === 'public' ? 'text-blue-400' : 'text-gray-400'}`}>
+                        <span className="text-gray-500 dark:text-gray-400">Privacy:</span>
+                        <span className={`font-medium ${pdf.privacy === 'public' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'}`}>
                           {pdf.privacy === 'public' ? 'Public' : 'Private'}
                         </span>
                       </div>
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-400">Status:</span>
+                        <span className="text-gray-500 dark:text-gray-400">Status:</span>
                         <button
                           onClick={() => handleStatusToggle(pdf.id, pdf.status)}
                           className={`font-medium px-3 py-1 rounded-full transition-all hover:opacity-80 text-xs ${
@@ -1385,20 +1630,20 @@ const Dashboard = () => {
                       <div className="flex items-center space-x-2">
                         <button 
                           onClick={() => navigate(`/pdf/${pdf.id}`)}
-                          className="flex-1 px-4 py-2 bg-white text-black text-sm font-medium rounded-lg hover:bg-gray-100 transition-colors"
+                          className="flex-1 px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-sm font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
                         >
                           Open
                         </button>
                         <button 
                           onClick={() => handleDownload(pdf)}
-                          className="p-2 border border-zinc-700 text-gray-400 rounded-lg hover:text-white hover:border-zinc-600 transition-colors"
+                          className="p-2 border-2 border-gray-300 dark:border-zinc-700 text-gray-600 dark:text-gray-400 rounded-lg hover:text-gray-900 dark:hover:text-white hover:border-gray-400 dark:hover:border-zinc-600 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
                           title="Download"
                         >
                           <Download className="w-4 h-4" />
                         </button>
                         <button 
                           onClick={() => handleDelete(pdf)}
-                          className="p-2 border border-zinc-700 text-gray-400 rounded-lg hover:text-red-400 hover:border-red-600 transition-colors"
+                          className="p-2 border-2 border-gray-300 dark:border-zinc-700 text-gray-600 dark:text-gray-400 rounded-lg hover:text-red-500 dark:hover:text-red-400 hover:border-red-400 dark:hover:border-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
                           title="Delete"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -1427,12 +1672,12 @@ const Dashboard = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-3xl font-bold text-white mb-2">My Courses</h1>
-                  <p className="text-gray-400">All your PDFs and courses</p>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">My Courses</h1>
+                  <p className="text-gray-600 dark:text-gray-400">All your PDFs and courses</p>
                 </div>
                 <button 
                   onClick={() => setNewCourseModalOpen(true)}
-                  className="px-6 py-3 bg-white text-black rounded-lg font-semibold hover:bg-gray-100 transition-colors flex items-center space-x-2"
+                  className="px-6 py-3 bg-gray-100 dark:bg-white text-gray-900 dark:text-black rounded-lg font-semibold hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors flex items-center space-x-2 border-2 border-gray-300 dark:border-transparent"
                 >
                   <Plus className="w-5 h-5" />
                   <span>New Course</span>
@@ -1444,12 +1689,12 @@ const Dashboard = () => {
                   <motion.div
                     key={course.id}
                     whileHover={{ y: -4 }}
-                    className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 hover:border-zinc-700 transition-all"
+                    className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-gray-300 dark:hover:border-zinc-700 transition-all"
                   >
                     <div className="flex items-start justify-between mb-4">
                       <div>
-                        <h3 className="text-xl font-bold text-white mb-2">{course.title}</h3>
-                        <div className="flex items-center space-x-4 text-sm text-gray-400">
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{course.title}</h3>
+                        <div className="flex items-center space-x-4 text-sm text-gray-600 dark:text-gray-400">
                           <span>{course.total_pdfs || 0} PDF</span>
                           <span>•</span>
                           <span>{course.total_quizzes || 0} Quiz</span>
@@ -1462,8 +1707,8 @@ const Dashboard = () => {
                         onClick={() => toggleFavorite(course.id)}
                         className={`p-2 transition-colors ${
                           favoriteCourses.includes(course.id) 
-                            ? 'text-yellow-400' 
-                            : 'text-gray-400 hover:text-yellow-400'
+                            ? 'text-yellow-500 dark:text-yellow-400' 
+                            : 'text-gray-500 dark:text-gray-400 hover:text-yellow-500 dark:hover:text-yellow-400'
                         }`}
                       >
                         <Star 
@@ -1476,10 +1721,10 @@ const Dashboard = () => {
                     {/* Progress */}
                     <div className="space-y-2 mb-4">
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-400">Progress</span>
-                        <span className="text-white font-medium">{course.progress}%</span>
+                        <span className="text-gray-500 dark:text-gray-400">Progress</span>
+                        <span className="text-gray-900 dark:text-white font-medium">{course.progress}%</span>
                       </div>
-                      <div className="w-full bg-zinc-800 rounded-full h-2">
+                      <div className="w-full bg-gray-200 dark:bg-zinc-800 rounded-full h-2">
                         <div
                           className="h-2 rounded-full bg-gradient-to-r from-blue-500 to-purple-500"
                           style={{ width: `${course.progress}%` }}
@@ -1487,14 +1732,14 @@ const Dashboard = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between pt-4 border-t border-zinc-800">
-                      <span className="text-xs text-gray-400 flex items-center space-x-1">
+                    <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-zinc-800">
+                      <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center space-x-1">
                         <Clock className="w-3 h-3" />
                         <span>{new Date(course.created_at).toLocaleDateString()}</span>
                       </span>
                       <button 
                         onClick={() => setSelectedCourse(course)}
-                        className="px-4 py-2 bg-white text-black text-sm font-medium rounded-lg hover:bg-gray-100 transition-colors"
+                        className="px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-sm font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
                       >
                         Continue
                       </button>
@@ -1502,8 +1747,8 @@ const Dashboard = () => {
                   </motion.div>
                 )) : (
                   <div className="col-span-2 text-center py-16">
-                    <BookOpen className="w-20 h-20 text-gray-600 mx-auto mb-4" />
-                    <p className="text-gray-400 text-xl mb-2">No courses yet</p>
+                    <BookOpen className="w-20 h-20 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600 dark:text-gray-400 text-xl mb-2">No courses yet</p>
                     <p className="text-gray-500 text-sm mb-6">Create your first course by grouping PDFs together!</p>
                     <button 
                       onClick={() => setNewCourseModalOpen(true)}
@@ -1522,12 +1767,12 @@ const Dashboard = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-3xl font-bold text-white mb-2">My Quizzes</h1>
-                  <p className="text-gray-400">Test your knowledge on uploaded PDFs</p>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">My Quizzes</h1>
+                  <p className="text-gray-600 dark:text-gray-400">Test your knowledge on uploaded PDFs</p>
                 </div>
                 <button 
                   onClick={() => setNewQuizModalOpen(true)}
-                  className="px-6 py-3 bg-white text-black rounded-lg font-semibold hover:bg-gray-100 transition-colors flex items-center space-x-2"
+                  className="px-6 py-3 bg-gray-100 dark:bg-white text-gray-900 dark:text-black rounded-lg font-semibold hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors flex items-center space-x-2 border-2 border-gray-300 dark:border-transparent"
                 >
                   <Plus className="w-5 h-5" />
                   <span>New Quiz</span>
@@ -1540,15 +1785,15 @@ const Dashboard = () => {
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="bg-zinc-900 border-2 border-purple-500/50 rounded-xl p-6"
+                    className="bg-white dark:bg-zinc-900 border-2 border-purple-500/50 rounded-xl p-6"
                   >
                     <div className="flex items-center space-x-4">
                       <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center">
                         <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
                       </div>
                       <div className="flex-1">
-                        <h3 className="text-lg font-semibold text-white mb-1">Creating Quiz...</h3>
-                        <p className="text-sm text-gray-400">AI is generating questions from your PDF. This may take 20-40 seconds.</p>
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Creating Quiz...</h3>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">AI is generating questions from your PDF. This may take 20-40 seconds.</p>
                       </div>
                     </div>
                   </motion.div>
@@ -1559,7 +1804,7 @@ const Dashboard = () => {
                   <motion.div
                     key={quiz.id}
                     whileHover={{ x: 4 }}
-                    className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 hover:border-zinc-700 transition-all cursor-pointer"
+                    className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-gray-300 dark:hover:border-zinc-700 transition-all cursor-pointer"
                     onClick={() => navigate(`/quiz/${quiz.id}`)}
                   >
                     <div className="flex items-center justify-between">
@@ -1568,17 +1813,17 @@ const Dashboard = () => {
                           <Brain className="w-6 h-6 text-white" />
                         </div>
                         <div className="flex-1">
-                          <h3 className="text-lg font-semibold text-white mb-1 flex items-center space-x-2">
+                          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1 flex items-center space-x-2">
                             <span>{quiz.title}</span>
                             <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
                               quiz.privacy === 'public'
-                                ? 'bg-blue-500/20 text-blue-400'
-                                : 'bg-zinc-800 text-gray-400'
+                                ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400'
+                                : 'bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-gray-400'
                             }`}>
                               {quiz.privacy === 'public' ? 'Public' : 'Private'}
                             </span>
                           </h3>
-                          <div className="flex items-center space-x-4 text-sm text-gray-400">
+                          <div className="flex items-center space-x-4 text-sm text-gray-600 dark:text-gray-400">
                             <span>{quiz.total_questions} questions</span>
                             {lastScoreByQuizId[quiz.id] && (
                               <>
@@ -1620,7 +1865,7 @@ const Dashboard = () => {
                             e.stopPropagation();
                             handleDeleteQuiz(quiz);
                           }}
-                          className="p-2 text-gray-400 hover:text-red-400 hover:bg-zinc-800 rounded-lg transition-colors"
+                          className="p-2 border-2 border-gray-300 dark:border-transparent text-gray-600 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-zinc-800 rounded-lg transition-colors"
                           title="Delete quiz"
                         >
                           <Trash2 className="w-5 h-5" />
@@ -1630,8 +1875,8 @@ const Dashboard = () => {
                   </motion.div>
                 )) : !creatingQuiz && (
                   <div className="text-center py-16">
-                    <Brain className="w-20 h-20 text-gray-600 mx-auto mb-4" />
-                    <p className="text-gray-400 text-xl mb-2">No quizzes yet</p>
+                    <Brain className="w-20 h-20 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600 dark:text-gray-400 text-xl mb-2">No quizzes yet</p>
                     <p className="text-gray-500 text-sm mb-6">Create your first quiz from your uploaded PDFs!</p>
                     <button 
                       onClick={() => setNewQuizModalOpen(true)}
@@ -1650,19 +1895,19 @@ const Dashboard = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-3xl font-bold text-white mb-2">Shared Content</h1>
-                  <p className="text-gray-400">Explore public PDFs and quizzes from all users</p>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Shared Content</h1>
+                  <p className="text-gray-600 dark:text-gray-400">Explore public PDFs and quizzes from all users</p>
                 </div>
                 <div className="flex items-center space-x-3">
-                  <div className="hidden md:flex bg-zinc-900 border border-zinc-800 rounded-full p-1">
+                  <div className="hidden md:flex bg-gray-200 dark:bg-zinc-900 border border-gray-300 dark:border-zinc-800 rounded-full p-1">
                     {['pdfs', 'quizzes'].map((type) => (
                       <button
                         key={type}
                         onClick={() => setSharedView(type)}
                         className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors ${
                           sharedView === type
-                            ? 'bg-white text-black'
-                            : 'text-gray-400 hover:text-white'
+                            ? 'bg-white dark:bg-white text-gray-900 dark:text-black shadow border border-gray-300 dark:border-transparent'
+                            : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
                         }`}
                       >
                         {type === 'pdfs' ? 'PDFs' : 'Quizzes'}
@@ -1692,36 +1937,36 @@ const Dashboard = () => {
               </div>
 
               {/* Filters */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-                <h3 className="text-sm font-semibold text-white mb-4">Filters</h3>
+              <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">Filters</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {/* Course Name Filter */}
                   <div>
-                    <label className="block text-xs text-gray-400 mb-2">Course Name</label>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-2">Course Name</label>
                     <input
                       type="text"
                       placeholder="e.g., ISG, Math..."
                       value={sharedFilters.courseName}
                       onChange={(e) => setSharedFilters({ ...sharedFilters, courseName: e.target.value })}
-                      className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                      className="w-full px-3 py-2 bg-gray-100 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
                     />
                   </div>
 
                   {/* University Filter */}
                   <div>
-                    <label className="block text-xs text-gray-400 mb-2">University</label>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-2">University</label>
                     <input
                       type="text"
                       placeholder="e.g., Ege, Boğaziçi..."
                       value={sharedFilters.university}
                       onChange={(e) => setSharedFilters({ ...sharedFilters, university: e.target.value })}
-                      className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                      className="w-full px-3 py-2 bg-gray-100 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
                     />
                   </div>
 
                   {/* Grade Filter */}
                   <div className="md:col-span-3">
-                    <label className="block text-xs text-gray-400 mb-3">Grade (Select multiple)</label>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-3">Grade (Select multiple)</label>
                     <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
                       {['1', '2', '3', '4', "Master's", 'Doctorate'].map((grade) => (
                         <button
@@ -1730,7 +1975,7 @@ const Dashboard = () => {
                           className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                             sharedFilters.grades.includes(grade)
                               ? 'bg-blue-500 text-white border-2 border-blue-500'
-                              : 'bg-zinc-800 text-gray-400 border-2 border-zinc-700 hover:border-blue-500 hover:text-white'
+                              : 'bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-400 border-2 border-gray-300 dark:border-zinc-700 hover:border-blue-500 hover:text-gray-900 dark:hover:text-white'
                           }`}
                         >
                           {grade === "Master's" || grade === 'Doctorate' ? grade : `${grade}${grade === '1' ? 'st' : grade === '2' ? 'nd' : grade === '3' ? 'rd' : 'th'}`}
@@ -1744,7 +1989,7 @@ const Dashboard = () => {
                 {(sharedFilters.courseName || sharedFilters.university || sharedFilters.grades.length > 0) && (
                   <button
                     onClick={() => setSharedFilters({ courseName: '', university: '', grades: [] })}
-                    className="mt-4 text-sm text-blue-400 hover:text-blue-300 transition-colors"
+                    className="mt-4 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
                   >
                     Clear all filters
                   </button>
@@ -1757,7 +2002,7 @@ const Dashboard = () => {
                     <motion.div
                       key={pdf.id}
                       whileHover={{ scale: 1.02 }}
-                      className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 hover:border-zinc-700 transition-all"
+                      className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-gray-300 dark:hover:border-zinc-700 transition-all"
                     >
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex items-center space-x-3 flex-1">
@@ -1765,36 +2010,36 @@ const Dashboard = () => {
                             <FileText className="w-6 h-6 text-white" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h3 className="text-lg font-semibold text-white mb-1 truncate">{pdf.file_name}</h3>
-                            <p className="text-sm text-gray-400 mb-2">
-                              <span className="text-purple-400 font-medium">Public PDF</span>
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1 truncate">{pdf.file_name}</h3>
+                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                              <span className="text-purple-500 dark:text-purple-400 font-medium">Public PDF</span>
                             </p>
                             <div className="flex items-center space-x-2 text-xs flex-wrap gap-1">
-                              <span className="px-2 py-0.5 bg-zinc-800 text-gray-400 rounded">
+                              <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
                                 {pdf.university}
                               </span>
-                              <span className="px-2 py-0.5 bg-zinc-800 text-gray-400 rounded">
+                              <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
                                 Grade {pdf.grade}
                               </span>
-                              <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded">
+                              <span className="px-2 py-0.5 bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded">
                                 {pdf.course_name}
                               </span>
                             </div>
                           </div>
                         </div>
-                        <span className="px-3 py-1 text-xs font-medium rounded-full bg-blue-500/20 text-blue-400 flex-shrink-0">
+                        <span className="px-3 py-1 text-xs font-medium rounded-full bg-blue-500/20 text-blue-600 dark:text-blue-400 flex-shrink-0">
                           PDF
                         </span>
                       </div>
 
-                      <div className="flex items-center justify-between pt-4 border-t border-zinc-800">
-                        <div className="flex items-center space-x-2 text-sm text-gray-400">
+                      <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-zinc-800">
+                        <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
                           <Clock className="w-4 h-4" />
                           <span>{new Date(pdf.created_at).toLocaleDateString()}</span>
                         </div>
                         <button 
                           onClick={() => navigate(`/pdf/${pdf.id}`)}
-                          className="px-4 py-2 bg-white text-black text-sm font-medium rounded-lg hover:bg-gray-100 transition-colors"
+                          className="px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-sm font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
                         >
                           View
                         </button>
@@ -1817,7 +2062,7 @@ const Dashboard = () => {
                   <motion.div
                     key={quiz.id}
                     whileHover={{ scale: 1.02 }}
-                    className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 hover:border-zinc-700 transition-all cursor-pointer"
+                    className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-gray-300 dark:hover:border-zinc-700 transition-all cursor-pointer"
                     onClick={() => navigate(`/quiz/${quiz.id}`)}
                   >
                     <div className="flex items-start justify-between mb-4">
@@ -1826,15 +2071,15 @@ const Dashboard = () => {
                           <Brain className="w-6 h-6 text-white" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h3 className="text-lg font-semibold text-white mb-1 truncate">{quiz.title}</h3>
-                          <p className="text-sm text-gray-400 mb-2">
-                            <span className="text-purple-400 font-medium">Public Quiz</span>
+                          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1 truncate">{quiz.title}</h3>
+                          <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                            <span className="text-purple-500 dark:text-purple-400 font-medium">Public Quiz</span>
                             {quiz.pdf && (
-                              <> • <span className="text-blue-400">{quiz.pdf.file_name}</span></>
+                              <> • <span className="text-blue-600 dark:text-blue-400">{quiz.pdf.file_name}</span></>
                             )}
                           </p>
                           <div className="flex items-center flex-wrap gap-2 text-xs">
-                            <span className="px-2 py-0.5 bg-zinc-800 text-gray-400 rounded">
+                            <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
                               {quiz.total_questions} questions
                             </span>
                             <span className={`px-2 py-0.5 rounded capitalize ${
@@ -1847,17 +2092,17 @@ const Dashboard = () => {
                               {quiz.difficulty}
                             </span>
                             {quiz.pdf?.university && (
-                              <span className="px-2 py-0.5 bg-zinc-800 text-gray-400 rounded">
+                              <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
                                 {quiz.pdf.university}
                               </span>
                             )}
                             {quiz.pdf?.grade && (
-                              <span className="px-2 py-0.5 bg-zinc-800 text-gray-400 rounded">
+                              <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
                                 Grade {quiz.pdf.grade}
                               </span>
                             )}
                             {quiz.pdf?.course_name && (
-                              <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded">
+                              <span className="px-2 py-0.5 bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded">
                                 {quiz.pdf.course_name}
                               </span>
                             )}
@@ -1893,69 +2138,172 @@ const Dashboard = () => {
             </div>
           )}
 
+          {activeSection === 'community' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Community</h1>
+                  <p className="text-gray-500 dark:text-gray-400">Share photos, ask questions, answer with comments to others</p>
+                </div>
+                <button
+                  onClick={() => setCommunityPostModalOpen(true)}
+                  className="flex items-center space-x-2 px-4 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-lg font-semibold hover:opacity-90 transition-opacity"
+                >
+                  <ImagePlus className="w-5 h-5" />
+                  <span>Add Post</span>
+                </button>
+              </div>
+
+              {/* Course Filter */}
+              <div className="bg-gray-100 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-4">
+                <div className="flex items-center gap-3">
+                  <Search className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                  <input
+                    type="text"
+                    value={communityFilterCourse}
+                    onChange={(e) => {
+                      setCommunityFilterCourse(e.target.value);
+                    }}
+                    placeholder="Filter by course name..."
+                    className="flex-1 px-4 py-2 bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  {communityFilterCourse && (
+                    <button
+                      onClick={() => {
+                        setCommunityFilterCourse('');
+                        loadCommunityPosts();
+                      }}
+                      className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {communityLoading ? (
+                <div className="flex justify-center py-12">
+                  <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : communityPosts.length === 0 ? (
+                <div className="bg-gray-100 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-12 text-center">
+                  <MessageCircle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-600 dark:text-gray-400 mb-2">No posts yet</p>
+                  <p className="text-gray-500 dark:text-gray-500 text-sm mb-4">Be the first to share a photo: ask a question or open a topic, others can respond with comments.</p>
+                  <button
+                    onClick={() => setCommunityPostModalOpen(true)}
+                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                  >
+                    Add Post
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {communityPosts.map((post) => (
+                    <motion.div
+                      key={post.id}
+                      whileHover={{ y: -2 }}
+                      className="bg-gray-100 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl overflow-hidden cursor-pointer hover:border-blue-500/50 transition-colors relative group"
+                      onClick={() => openCommunityPostDetail(post)}
+                    >
+                      {/* Delete button - only show for user's own posts */}
+                      {user && post.user_id === user.id && (
+                        <button
+                          onClick={(e) => handleDeleteCommunityPost(post, e)}
+                          className="absolute top-2 right-2 z-10 p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                          title="Delete post"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                      <div className="aspect-video bg-gray-200 dark:bg-zinc-800 relative">
+                        <img
+                          src={post.image_url}
+                          alt={post.caption || 'Gönderi'}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      <div className="p-4">
+                        {post.course_name && (
+                          <span className="inline-block px-2 py-1 mb-2 text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30 rounded">
+                            {post.course_name}
+                          </span>
+                        )}
+                        <p className="text-gray-900 dark:text-white font-medium line-clamp-2 mb-1">{post.caption || 'No description'}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          {post.author_name || 'User'} · {new Date(post.created_at).toLocaleDateString('tr-TR')}
+                        </p>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {activeSection === 'settings' && (
             <div className="space-y-6">
               <div>
-                <h1 className="text-3xl font-bold text-white mb-2">Settings</h1>
-                <p className="text-gray-400">Account and app settings</p>
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Settings</h1>
+                <p className="text-gray-500 dark:text-gray-400">Account and app settings</p>
               </div>
 
               {/* Profile Settings */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-                <h2 className="text-xl font-bold text-white mb-6">Profile Information</h2>
+              <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Profile Information</h2>
                 <div className="space-y-4">
                   <div className="flex items-center space-x-4">
                     <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
                       <span className="text-white font-bold text-2xl">K</span>
                     </div>
-                    <button className="px-4 py-2 bg-white text-black text-sm font-medium rounded-lg hover:bg-gray-100 transition-colors">
+                    <button className="px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-black text-sm font-medium rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors">
                       Change Photo
                     </button>
                   </div>
                   <form onSubmit={handleProfileUpdate} className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           First Name
                         </label>
                         <input
                           type="text"
                           value={profileData.firstName}
                           onChange={(e) => setProfileData({...profileData, firstName: e.target.value})}
-                          className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-lg text-white focus:ring-2 focus:ring-white focus:border-transparent"
+                          className="w-full px-4 py-3 bg-gray-50 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-white focus:border-transparent"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Last Name
                         </label>
                         <input
                           type="text"
                           value={profileData.lastName}
                           onChange={(e) => setProfileData({...profileData, lastName: e.target.value})}
-                          className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-lg text-white focus:ring-2 focus:ring-white focus:border-transparent"
+                          className="w-full px-4 py-3 bg-gray-50 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-white focus:border-transparent"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Email
                         </label>
                         <input
                           type="email"
                           value={user?.email || ''}
-                          className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-lg text-white focus:ring-2 focus:ring-white focus:border-transparent opacity-50"
+                          className="w-full px-4 py-3 bg-gray-50 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-white focus:border-transparent opacity-50"
                           disabled
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           University
                         </label>
                         <input
                           type="text"
                           value={profileData.university}
                           onChange={(e) => setProfileData({...profileData, university: e.target.value})}
-                          className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-lg text-white focus:ring-2 focus:ring-white focus:border-transparent"
+                          className="w-full px-4 py-3 bg-gray-50 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-white focus:border-transparent"
                           placeholder="University name..."
                         />
                       </div>
@@ -1965,8 +2313,8 @@ const Dashboard = () => {
                     {saveMessage && (
                       <div className={`p-3 rounded-lg ${
                         saveMessage.type === 'success' 
-                          ? 'bg-green-900/20 border border-green-500 text-green-400' 
-                          : 'bg-red-900/20 border border-red-500 text-red-400'
+                          ? 'bg-green-50 dark:bg-green-900/20 border border-green-500 text-green-600 dark:text-green-400' 
+                          : 'bg-red-50 dark:bg-red-900/20 border border-red-500 text-red-600 dark:text-red-400'
                       }`}>
                         {saveMessage.text}
                       </div>
@@ -1975,7 +2323,7 @@ const Dashboard = () => {
                     <button 
                       type="submit"
                       disabled={isSaving}
-                      className="px-6 py-3 bg-white text-black rounded-lg font-semibold hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-6 py-3 bg-gray-900 dark:bg-white text-white dark:text-black rounded-lg font-semibold hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {isSaving ? 'Saving...' : 'Save Changes'}
                     </button>
@@ -1984,8 +2332,8 @@ const Dashboard = () => {
               </div>
 
               {/* Notification Settings */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-                <h2 className="text-xl font-bold text-white mb-6">Notifications</h2>
+              <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Notifications</h2>
                 <div className="space-y-4">
                   {[
                     { label: 'Email notifications', description: 'Receive emails for new content and updates' },
@@ -1993,14 +2341,14 @@ const Dashboard = () => {
                     { label: 'Share notifications', description: 'Notify when your content is shared' },
                     { label: 'Weekly summary', description: 'Send weekly learning summary' },
                   ].map((item, index) => (
-                    <div key={index} className="flex items-center justify-between py-3 border-b border-zinc-800 last:border-0">
+                    <div key={index} className="flex items-center justify-between py-3 border-b border-gray-200 dark:border-zinc-800 last:border-0">
                       <div>
-                        <p className="text-white font-medium">{item.label}</p>
-                        <p className="text-sm text-gray-400">{item.description}</p>
+                        <p className="text-gray-900 dark:text-white font-medium">{item.label}</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">{item.description}</p>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" defaultChecked className="sr-only peer" />
-                        <div className="w-11 h-6 bg-zinc-700 peer-focus:ring-2 peer-focus:ring-blue-500/50 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-zinc-400 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gradient-to-r peer-checked:from-blue-500 peer-checked:to-purple-500 peer-checked:after:bg-white"></div>
+                        <div className="w-11 h-6 bg-gray-300 dark:bg-zinc-700 peer-focus:ring-2 peer-focus:ring-blue-500/50 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white dark:after:bg-zinc-400 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gradient-to-r peer-checked:from-blue-500 peer-checked:to-purple-500 peer-checked:after:bg-white"></div>
                       </label>
                     </div>
                   ))}
@@ -2008,25 +2356,25 @@ const Dashboard = () => {
               </div>
 
               {/* Privacy Settings */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-                <h2 className="text-xl font-bold text-white mb-6">Privacy</h2>
+              <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Privacy</h2>
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between py-3 border-b border-zinc-800">
+                  <div className="flex items-center justify-between py-3 border-b border-gray-200 dark:border-zinc-800">
                     <div>
-                      <p className="text-white font-medium">Make my profile public</p>
-                      <p className="text-sm text-gray-400">Other users can see your profile</p>
+                      <p className="text-gray-900 dark:text-white font-medium">Make my profile public</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">Other users can see your profile</p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
                       <input type="checkbox" defaultChecked className="sr-only peer" />
-                      <div className="w-11 h-6 bg-zinc-700 peer-focus:ring-2 peer-focus:ring-blue-500/50 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-zinc-400 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gradient-to-r peer-checked:from-blue-500 peer-checked:to-purple-500 peer-checked:after:bg-white"></div>
+                      <div className="w-11 h-6 bg-gray-300 dark:bg-zinc-700 peer-focus:ring-2 peer-focus:ring-blue-500/50 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white dark:after:bg-zinc-400 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gradient-to-r peer-checked:from-blue-500 peer-checked:to-purple-500 peer-checked:after:bg-white"></div>
                     </label>
                   </div>
                   <div className="flex items-center justify-between py-3">
                     <div>
-                      <p className="text-white font-medium">Default sharing setting</p>
-                      <p className="text-sm text-gray-400">Default privacy for new PDFs</p>
+                      <p className="text-gray-900 dark:text-white font-medium">Default sharing setting</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">Default privacy for new PDFs</p>
                     </div>
-                    <select className="px-4 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white focus:ring-2 focus:ring-white">
+                    <select className="px-4 py-2 bg-gray-50 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-white">
                       <option value="private">Private</option>
                       <option value="public">Public</option>
                     </select>
@@ -2035,13 +2383,13 @@ const Dashboard = () => {
               </div>
 
               {/* Danger Zone */}
-              <div className="bg-red-900/20 border border-red-800 rounded-xl p-6">
-                <h2 className="text-xl font-bold text-red-400 mb-4">Danger Zone</h2>
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-6">
+                <h2 className="text-xl font-bold text-red-600 dark:text-red-400 mb-4">Danger Zone</h2>
                 <div className="space-y-3">
-                  <button className="w-full px-4 py-3 bg-red-900/50 text-red-400 border border-red-800 rounded-lg hover:bg-red-900 transition-colors font-medium">
+                  <button className="w-full px-4 py-3 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-400 border border-red-300 dark:border-red-800 rounded-lg hover:bg-red-200 dark:hover:bg-red-900 transition-colors font-medium">
                     Download All Data
                   </button>
-                  <button className="w-full px-4 py-3 bg-red-900/50 text-red-400 border border-red-800 rounded-lg hover:bg-red-900 transition-colors font-medium">
+                  <button className="w-full px-4 py-3 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-400 border border-red-300 dark:border-red-800 rounded-lg hover:bg-red-200 dark:hover:bg-red-900 transition-colors font-medium">
                     Delete Account
                   </button>
                 </div>
@@ -2835,6 +3183,53 @@ const Dashboard = () => {
         </div>
       )}
 
+      {/* Delete Community Post Modal */}
+      {deleteCommunityPostModalOpen && communityPostToDelete && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-gray-100 dark:bg-zinc-900 border-2 border-gray-200 dark:border-zinc-800 rounded-2xl p-8 max-w-md w-full"
+          >
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="w-16 h-16 bg-red-100 dark:bg-red-900/20 rounded-full flex items-center justify-center mb-4">
+                <Trash2 className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Delete Post?</h3>
+              <p className="text-gray-600 dark:text-gray-400">
+                Are you sure you want to delete this post? This action cannot be undone.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setDeleteCommunityPostModalOpen(false);
+                  setCommunityPostToDelete(null);
+                }}
+                className="flex-1 px-6 py-3 bg-gray-200 dark:bg-zinc-800 text-gray-900 dark:text-white rounded-xl font-semibold hover:opacity-90 transition-opacity"
+                disabled={deletingCommunityPost}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteCommunityPost}
+                disabled={deletingCommunityPost}
+                className="flex-1 px-6 py-3 bg-red-500 text-white rounded-xl font-semibold hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deletingCommunityPost ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Deleting...
+                  </span>
+                ) : (
+                  'Delete'
+                )}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
       {/* Delete PDF Confirmation Modal */}
       {deleteModalOpen && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -2868,6 +3263,149 @@ const Dashboard = () => {
                 className="flex-1 px-6 py-3 bg-red-500 text-white rounded-xl font-semibold hover:bg-red-600 transition-colors"
               >
                 Delete
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* New Community Post Modal */}
+      {communityPostModalOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-gray-100 dark:bg-zinc-900 border-2 border-gray-200 dark:border-zinc-800 rounded-2xl p-8 max-w-lg w-full"
+          >
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">New Post</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Upload a photo and write a question or topic description below (e.g., &quot;What is the answer to this question?&quot;, &quot;How does this topic work?&quot;)</p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Photo</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setCommunityNewPost((p) => ({ ...p, imageFile: e.target.files?.[0] || null }))}
+                  className="w-full text-sm text-gray-600 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-500 file:text-white file:font-medium"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Course Name</label>
+                <input
+                  type="text"
+                  value={communityNewPost.courseName}
+                  onChange={(e) => setCommunityNewPost((p) => ({ ...p, courseName: e.target.value }))}
+                  placeholder="e.g., Mathematics, Physics, Chemistry..."
+                  className="w-full px-4 py-3 bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Description / Question</label>
+                <textarea
+                  value={communityNewPost.caption}
+                  onChange={(e) => setCommunityNewPost((p) => ({ ...p, caption: e.target.value }))}
+                  placeholder="Bu sorunun cevabı ne? / Bu konu nasıl oluyor?"
+                  rows={3}
+                  className="w-full px-4 py-3 bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setCommunityPostModalOpen(false);
+                  setCommunityNewPost({ imageFile: null, caption: '', courseName: '' });
+                }}
+                className="flex-1 px-6 py-3 bg-gray-200 dark:bg-zinc-800 text-gray-900 dark:text-white rounded-xl font-semibold hover:opacity-90"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitCommunityPost}
+                disabled={!communityNewPost.imageFile || communityPosting}
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl font-semibold hover:opacity-90 disabled:opacity-50"
+              >
+                {communityPosting ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Uploading...
+                  </span>
+                ) : (
+                  'Share'
+                )}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Community Post Detail Modal (comments) */}
+      {selectedCommunityPost && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-gray-100 dark:bg-zinc-900 border-2 border-gray-200 dark:border-zinc-800 rounded-2xl overflow-hidden max-w-2xl w-full max-h-[90vh] flex flex-col"
+          >
+            <div className="p-4 border-b border-gray-200 dark:border-zinc-800 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Posts &amp; Comments</h3>
+              <div className="flex items-center gap-2">
+                {/* Delete button - only show for user's own posts */}
+                {user && selectedCommunityPost.user_id === user.id && (
+                  <button
+                    onClick={() => handleDeleteCommunityPost(selectedCommunityPost)}
+                    className="p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                    title="Delete post"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                )}
+                <button
+                  onClick={() => { setSelectedCommunityPost(null); setCommunityComments([]); setNewCommentText(''); }}
+                  className="p-2 rounded-lg text-gray-500 hover:bg-gray-200 dark:hover:bg-zinc-800"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4 space-y-4">
+              <div className="rounded-xl overflow-hidden bg-gray-200 dark:bg-zinc-800">
+                <img src={selectedCommunityPost.image_url} alt={selectedCommunityPost.caption || ''} className="w-full max-h-80 object-contain" />
+              </div>
+              <p className="text-gray-900 dark:text-white font-medium">{selectedCommunityPost.caption || 'No description'}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{selectedCommunityPost.author_name || 'User'} · {new Date(selectedCommunityPost.created_at).toLocaleString('tr-TR')}</p>
+              <div className="pt-2">
+                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Comments</p>
+                {communityComments.length === 0 ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">No comments yet. Be the first to write an answer.</p>
+                ) : (
+                  <ul className="space-y-3">
+                    {communityComments.map((c) => (
+                      <li key={c.id} className="bg-white dark:bg-zinc-800 rounded-lg p-3 text-sm text-gray-800 dark:text-gray-200">
+                        <p className="font-medium text-gray-700 dark:text-gray-300">{c.author_name || 'User'}</p>
+                        <p className="mt-1">{c.content}</p>
+                        <p className="text-xs text-gray-500 mt-1">{(c.created_at && new Date(c.created_at).toLocaleString('tr-TR')) || ''}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+            <div className="p-4 border-t border-gray-200 dark:border-zinc-800 flex gap-2">
+              <input
+                type="text"
+                value={newCommentText}
+                onChange={(e) => setNewCommentText(e.target.value)}
+                placeholder="Write your answer or explanation..."
+                className="flex-1 px-4 py-3 bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={submitCommunityComment}
+                disabled={!newCommentText.trim() || submittingComment}
+                className="px-4 py-3 bg-blue-500 text-white rounded-xl font-medium hover:bg-blue-600 disabled:opacity-50 flex items-center gap-1"
+              >
+                <Send className="w-5 h-5" />
+                {submittingComment ? '...' : 'Send'}
               </button>
             </div>
           </motion.div>

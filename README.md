@@ -127,6 +127,13 @@ Backend implementasyonu için Req.md dosyasındaki spesifikasyonları takip edil
 - **Responsive**: Tüm cihazlarda mükemmel görünüm
 - **Performance**: Hızlı ve optimize edilmiş
 
+## 🔧 Supabase (Community özelliği)
+
+Dashboard’daki **Community** bölümü (fotoğraf paylaşımı ve yorumlar) için Supabase’de şunlar gerekir:
+
+- **Tablo ve RLS**: `community_posts` ve `community_comments` migration ile oluşturulmuş olmalı.
+- **Storage**: Supabase Dashboard → **Storage** → **New bucket** → isim: `community`, **Public bucket** işaretli olsun. Böylece yüklenen fotoğraflar herkese açık URL ile kullanılabilir.
+
 ## 📚 Dokümantasyon
 
 Detaylı teknik spesifikasyonlar ve sistem mimarisi için [Req.md](./Req.md) dosyasına bakınız.
