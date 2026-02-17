@@ -74,13 +74,18 @@ const Dashboard = () => {
   const [deleteCourseModalOpen, setDeleteCourseModalOpen] = useState(false);
   const [courseToDelete, setCourseToDelete] = useState(null);
   const [publicPDFs, setPublicPDFs] = useState([]);
+  const [publicPdfRatings, setPublicPdfRatings] = useState({}); // { [pdfId]: { avg, count } }
+  const [userPdfRatings, setUserPdfRatings] = useState({}); // { [pdfId]: rating }
   const [sharedFilters, setSharedFilters] = useState({
     courseName: '',
     university: '',
     grades: []
   });
+  const [sharedSort, setSharedSort] = useState('default'); // 'default' | 'most_votes' | 'highest_rating'
   const [refreshingPublic, setRefreshingPublic] = useState(false);
   const [publicQuizzes, setPublicQuizzes] = useState([]);
+  const [publicQuizRatings, setPublicQuizRatings] = useState({}); // { [quizId]: { avg, count } }
+  const [userQuizRatings, setUserQuizRatings] = useState({}); // { [quizId]: rating }
   const [sharedView, setSharedView] = useState('pdfs'); // 'pdfs' | 'quizzes'
   const [deleteQuizModalOpen, setDeleteQuizModalOpen] = useState(false);
   const [quizToDelete, setQuizToDelete] = useState(null);
@@ -194,9 +199,34 @@ const Dashboard = () => {
     }
   };
 
-  // Filter public PDFs
+  // Apply shared sort (by votes / rating)
+  const applySharedSort = (items, getRatingStats) => {
+    if (sharedSort === 'most_votes') {
+      return [...items].sort((a, b) => {
+        const aStats = getRatingStats(a) || { count: 0, avg: 0 };
+        const bStats = getRatingStats(b) || { count: 0, avg: 0 };
+
+        if (bStats.count !== aStats.count) return bStats.count - aStats.count;
+        return (bStats.avg || 0) - (aStats.avg || 0);
+      });
+    }
+
+    if (sharedSort === 'highest_rating') {
+      return [...items].sort((a, b) => {
+        const aStats = getRatingStats(a) || { count: 0, avg: 0 };
+        const bStats = getRatingStats(b) || { count: 0, avg: 0 };
+
+        if ((bStats.avg || 0) !== (aStats.avg || 0)) return (bStats.avg || 0) - (aStats.avg || 0);
+        return bStats.count - aStats.count;
+      });
+    }
+
+    return items;
+  };
+
+  // Filter + sort public PDFs
   const getFilteredPublicPDFs = () => {
-    return publicPDFs.filter(pdf => {
+    const filtered = publicPDFs.filter(pdf => {
       const matchCourse = !sharedFilters.courseName || 
         pdf.course_name.toLowerCase().includes(sharedFilters.courseName.toLowerCase());
       const matchUniversity = !sharedFilters.university || 
@@ -206,6 +236,8 @@ const Dashboard = () => {
       
       return matchCourse && matchUniversity && matchGrade;
     });
+
+    return applySharedSort(filtered, (pdf) => publicPdfRatings[pdf.id]);
   };
 
   // Refresh public PDFs
@@ -226,6 +258,180 @@ const Dashboard = () => {
     });
   };
 
+  // Rate a public PDF (1-5 stars)
+  const handleRatePdf = async (pdfId, rating) => {
+    if (!user) {
+      alert('Please log in to rate PDFs.');
+      return;
+    }
+    try {
+      const current = userPdfRatings[pdfId];
+
+      if (current && current === rating) {
+        // Same star clicked again -> remove rating
+        const { error: deleteError } = await supabase
+          .from('pdf_ratings')
+          .delete()
+          .eq('pdf_id', pdfId)
+          .eq('user_id', user.id);
+
+        if (deleteError) throw deleteError;
+
+        // Refresh ratings for this PDF
+        const { data: rows, error: rowsError } = await supabase
+          .from('pdf_ratings')
+          .select('rating')
+          .eq('pdf_id', pdfId);
+
+        if (!rowsError && rows) {
+          const sum = rows.reduce((acc, r) => acc + r.rating, 0);
+          const count = rows.length;
+
+          setPublicPdfRatings((prev) => ({
+            ...prev,
+            [pdfId]: count > 0 ? { avg: sum / count, count } : undefined
+          }));
+
+          setUserPdfRatings((prev) => {
+            const copy = { ...prev };
+            delete copy[pdfId];
+            return copy;
+          });
+        }
+        return;
+      }
+
+      // New rating or change
+      const { error } = await supabase
+        .from('pdf_ratings')
+        .upsert(
+          {
+            pdf_id: pdfId,
+            user_id: user.id,
+            rating
+          },
+          { onConflict: 'pdf_id,user_id' }
+        );
+
+      if (error) throw error;
+
+      // Refresh ratings for this PDF (simple select and compute on client)
+      const { data: rows, error: rowsError } = await supabase
+        .from('pdf_ratings')
+        .select('rating')
+        .eq('pdf_id', pdfId);
+
+      if (!rowsError && rows) {
+        const sum = rows.reduce((acc, r) => acc + r.rating, 0);
+        const count = rows.length;
+
+        setPublicPdfRatings((prev) => ({
+          ...prev,
+          [pdfId]: {
+            avg: count > 0 ? sum / count : 0,
+            count
+          }
+        }));
+
+        // Set current user's rating so stars show exactly what they chose
+        setUserPdfRatings((prev) => ({
+          ...prev,
+          [pdfId]: rating
+        }));
+      }
+    } catch (err) {
+      console.error('Error rating PDF:', err);
+      alert(err.message || 'Unable to submit rating.');
+    }
+  };
+
+  // Rate a public Quiz (1-5 stars)
+  const handleRateQuiz = async (quizId, rating) => {
+    if (!user) {
+      alert('Please log in to rate quizzes.');
+      return;
+    }
+    try {
+      const current = userQuizRatings[quizId];
+
+      if (current && current === rating) {
+        // Same star clicked again -> remove rating
+        const { error: deleteError } = await supabase
+          .from('quiz_ratings')
+          .delete()
+          .eq('quiz_id', quizId)
+          .eq('user_id', user.id);
+
+        if (deleteError) throw deleteError;
+
+        // Refresh ratings for this quiz
+        const { data: rows, error: rowsError } = await supabase
+          .from('quiz_ratings')
+          .select('rating')
+          .eq('quiz_id', quizId);
+
+        if (!rowsError && rows) {
+          const sum = rows.reduce((acc, r) => acc + r.rating, 0);
+          const count = rows.length;
+
+          setPublicQuizRatings((prev) => ({
+            ...prev,
+            [quizId]: count > 0 ? { avg: sum / count, count } : undefined
+          }));
+
+          setUserQuizRatings((prev) => {
+            const copy = { ...prev };
+            delete copy[quizId];
+            return copy;
+          });
+        }
+        return;
+      }
+
+      // New rating or change
+      const { error } = await supabase
+        .from('quiz_ratings')
+        .upsert(
+          {
+            quiz_id: quizId,
+            user_id: user.id,
+            rating
+          },
+          { onConflict: 'quiz_id,user_id' }
+        );
+
+      if (error) throw error;
+
+      // Refresh ratings for this quiz (simple select and compute on client)
+      const { data: rows, error: rowsError } = await supabase
+        .from('quiz_ratings')
+        .select('rating')
+        .eq('quiz_id', quizId);
+
+      if (!rowsError && rows) {
+        const sum = rows.reduce((acc, r) => acc + r.rating, 0);
+        const count = rows.length;
+
+        setPublicQuizRatings((prev) => ({
+          ...prev,
+          [quizId]: {
+            avg: count > 0 ? sum / count : 0,
+            count
+          }
+        }));
+
+        // Set current user's rating so stars show exactly what they chose
+        setUserQuizRatings((prev) => ({
+          ...prev,
+          [quizId]: rating
+        }));
+      }
+    } catch (err) {
+      console.error('Error rating quiz:', err);
+      alert(err.message || 'Unable to submit rating.');
+    }
+  };
+
   // Load public PDFs for Shared Content
   const loadPublicPDFs = async () => {
     try {
@@ -243,7 +449,50 @@ const Dashboard = () => {
       }
 
       console.log('✅ Public PDFs loaded:', data);
-      setPublicPDFs(data || []);
+      const pdfList = data || [];
+      setPublicPDFs(pdfList);
+
+      // Load ratings for these PDFs and compute average + current user's rating on the client
+      if (pdfList.length > 0) {
+        const pdfIds = pdfList.map((p) => p.id);
+        const { data: ratingRows, error: ratingError } = await supabase
+          .from('pdf_ratings')
+          .select('pdf_id, user_id, rating')
+          .in('pdf_id', pdfIds);
+
+        if (ratingError) {
+          console.error('❌ Error loading PDF ratings:', ratingError);
+          setPublicPdfRatings({});
+          setUserPdfRatings({});
+        } else {
+          const statsMap = {};
+          const userMap = {};
+          (ratingRows || []).forEach((row) => {
+            if (!statsMap[row.pdf_id]) {
+              statsMap[row.pdf_id] = { sum: 0, count: 0 };
+            }
+            statsMap[row.pdf_id].sum += row.rating;
+            statsMap[row.pdf_id].count += 1;
+
+            if (user && row.user_id === user.id) {
+              userMap[row.pdf_id] = row.rating;
+            }
+          });
+
+          const finalMap = {};
+          Object.entries(statsMap).forEach(([pdfId, { sum, count }]) => {
+            finalMap[pdfId] = {
+              avg: count > 0 ? sum / count : 0,
+              count
+            };
+          });
+          setPublicPdfRatings(finalMap);
+          setUserPdfRatings(userMap);
+        }
+      } else {
+        setPublicPdfRatings({});
+        setUserPdfRatings({});
+      }
     } catch (error) {
       console.error('❌ Error loading public PDFs:', error);
     }
@@ -269,7 +518,50 @@ const Dashboard = () => {
       }
 
       console.log('✅ Public quizzes loaded:', data);
-      setPublicQuizzes(data || []);
+      const quizList = data || [];
+      setPublicQuizzes(quizList);
+
+      // Load ratings for these quizzes and compute average + current user's rating on the client
+      if (quizList.length > 0) {
+        const quizIds = quizList.map((q) => q.id);
+        const { data: ratingRows, error: ratingError } = await supabase
+          .from('quiz_ratings')
+          .select('quiz_id, user_id, rating')
+          .in('quiz_id', quizIds);
+
+        if (ratingError) {
+          console.error('❌ Error loading quiz ratings:', ratingError);
+          setPublicQuizRatings({});
+          setUserQuizRatings({});
+        } else {
+          const statsMap = {};
+          const userMap = {};
+          (ratingRows || []).forEach((row) => {
+            if (!statsMap[row.quiz_id]) {
+              statsMap[row.quiz_id] = { sum: 0, count: 0 };
+            }
+            statsMap[row.quiz_id].sum += row.rating;
+            statsMap[row.quiz_id].count += 1;
+
+            if (user && row.user_id === user.id) {
+              userMap[row.quiz_id] = row.rating;
+            }
+          });
+
+          const finalMap = {};
+          Object.entries(statsMap).forEach(([quizId, { sum, count }]) => {
+            finalMap[quizId] = {
+              avg: count > 0 ? sum / count : 0,
+              count
+            };
+          });
+          setPublicQuizRatings(finalMap);
+          setUserQuizRatings(userMap);
+        }
+      } else {
+        setPublicQuizRatings({});
+        setUserQuizRatings({});
+      }
     } catch (error) {
       console.error('❌ Error loading public quizzes:', error);
     }
@@ -1985,20 +2277,64 @@ const Dashboard = () => {
                   </div>
                 </div>
 
-                {/* Clear Filters */}
-                {(sharedFilters.courseName || sharedFilters.university || sharedFilters.grades.length > 0) && (
-                  <button
-                    onClick={() => setSharedFilters({ courseName: '', university: '', grades: [] })}
-                    className="mt-4 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
-                  >
-                    Clear all filters
-                  </button>
-                )}
+                {/* Sort + Clear */}
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-600 dark:text-gray-400">Sort by:</span>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSharedSort('default')}
+                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                          sharedSort === 'default'
+                            ? 'bg-blue-500 text-white border-blue-500'
+                            : 'bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-zinc-700 hover:border-blue-500 hover:text-gray-900 dark:hover:text-white'
+                        }`}
+                      >
+                        Default
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSharedSort('most_votes')}
+                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                          sharedSort === 'most_votes'
+                            ? 'bg-blue-500 text-white border-blue-500'
+                            : 'bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-zinc-700 hover:border-blue-500 hover:text-gray-900 dark:hover:text-white'
+                        }`}
+                      >
+                        Most votes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSharedSort('highest_rating')}
+                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                          sharedSort === 'highest_rating'
+                            ? 'bg-blue-500 text-white border-blue-500'
+                            : 'bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-zinc-700 hover:border-blue-500 hover:text-gray-900 dark:hover:text-white'
+                        }`}
+                      >
+                        Highest rating
+                      </button>
+                    </div>
+                  </div>
+
+                  {(sharedFilters.courseName || sharedFilters.university || sharedFilters.grades.length > 0) && (
+                    <button
+                      onClick={() => setSharedFilters({ courseName: '', university: '', grades: [] })}
+                      className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
+                    >
+                      Clear all filters
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* PDFs list */}
-                {sharedView === 'pdfs' && (getFilteredPublicPDFs().length > 0 ? getFilteredPublicPDFs().map((pdf) => (
+                {sharedView === 'pdfs' && (getFilteredPublicPDFs().length > 0 ? getFilteredPublicPDFs().map((pdf) => {
+                  const ratingStats = publicPdfRatings[pdf.id];
+                  const userRating = userPdfRatings[pdf.id];
+                  return (
                     <motion.div
                       key={pdf.id}
                       whileHover={{ scale: 1.02 }}
@@ -2032,20 +2368,66 @@ const Dashboard = () => {
                         </span>
                       </div>
 
-                      <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-zinc-800">
-                        <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
-                          <Clock className="w-4 h-4" />
-                          <span>{new Date(pdf.created_at).toLocaleDateString()}</span>
+                      {/* Rating + Actions */}
+                      <div className="pt-4 border-t border-gray-200 dark:border-zinc-800 space-y-3">
+                        <div className="flex items-center justify-between">
+                          {/* Stars + average */}
+                          <div className="flex items-center gap-2">
+                            {/* Stars (user's vote) */}
+                            <div className="flex items-center gap-0.5">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <button
+                                key={star}
+                                type="button"
+                                onClick={() => handleRatePdf(pdf.id, star)}
+                                className="p-0.5"
+                                title={user ? `Rate ${star} star${star > 1 ? 's' : ''}` : 'Login to rate'}
+                              >
+                                <Star
+                                  className={`w-4 h-4 ${
+                                    userRating && userRating >= star
+                                      ? 'text-yellow-400'
+                                      : 'text-gray-300 dark:text-gray-600'
+                                  }`}
+                                />
+                              </button>
+                            ))}
+                          </div>
+
+                            {/* Average + votes */}
+                            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                              {ratingStats ? (
+                                <>
+                                  <span className="font-semibold text-gray-900 dark:text-white">
+                                    {ratingStats.avg.toFixed(1)}
+                                  </span>
+                                  <span className="h-3 w-px bg-gray-300 dark:bg-zinc-700" />
+                                  <span>
+                                    {ratingStats.count} vote{ratingStats.count === 1 ? '' : 's'}
+                                  </span>
+                                </>
+                              ) : (
+                                <span>No votes yet</span>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <button 
-                          onClick={() => navigate(`/pdf/${pdf.id}`)}
-                          className="px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-sm font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
-                        >
-                          View
-                        </button>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
+                            <Clock className="w-4 h-4" />
+                            <span>{new Date(pdf.created_at).toLocaleDateString()}</span>
+                          </div>
+                          <button 
+                            onClick={() => navigate(`/pdf/${pdf.id}`)}
+                            className="px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-sm font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
+                          >
+                            View
+                          </button>
+                        </div>
                       </div>
                     </motion.div>
-                )) : (
+                  );
+                }) : (
                   <div className="col-span-2 text-center py-16">
                     <Users className="w-20 h-20 text-gray-600 mx-auto mb-4" />
                     <p className="text-gray-400 text-xl mb-2">
@@ -2058,82 +2440,142 @@ const Dashboard = () => {
                 ))}
 
                 {/* Quizzes list */}
-                {sharedView === 'quizzes' && (publicQuizzes.length > 0 ? publicQuizzes.map((quiz) => (
-                  <motion.div
-                    key={quiz.id}
-                    whileHover={{ scale: 1.02 }}
-                    className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-gray-300 dark:hover:border-zinc-700 transition-all cursor-pointer"
-                    onClick={() => navigate(`/quiz/${quiz.id}`)}
-                  >
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center space-x-3 flex-1">
-                        <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                          <Brain className="w-6 h-6 text-white" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1 truncate">{quiz.title}</h3>
-                          <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                            <span className="text-purple-500 dark:text-purple-400 font-medium">Public Quiz</span>
-                            {quiz.pdf && (
-                              <> • <span className="text-blue-600 dark:text-blue-400">{quiz.pdf.file_name}</span></>
-                            )}
-                          </p>
-                          <div className="flex items-center flex-wrap gap-2 text-xs">
-                            <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
-                              {quiz.total_questions} questions
+                {sharedView === 'quizzes' && (
+                  applySharedSort(publicQuizzes, (quiz) => publicQuizRatings[quiz.id]).length > 0 ? (
+                    applySharedSort(publicQuizzes, (quiz) => publicQuizRatings[quiz.id]).map((quiz) => {
+                      const ratingStats = publicQuizRatings[quiz.id];
+                      const userRating = userQuizRatings[quiz.id];
+
+                      return (
+                        <motion.div
+                          key={quiz.id}
+                          whileHover={{ scale: 1.02 }}
+                          className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-gray-300 dark:hover:border-zinc-700 transition-all cursor-pointer"
+                          onClick={() => navigate(`/quiz/${quiz.id}`)}
+                        >
+                          <div className="flex items-start justify-between mb-4">
+                            <div className="flex items-center space-x-3 flex-1">
+                              <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                                <Brain className="w-6 h-6 text-white" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1 truncate">
+                                  {quiz.title}
+                                </h3>
+                                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                                  <span className="text-purple-500 dark:text-purple-400 font-medium">Public Quiz</span>
+                                  {quiz.pdf && (
+                                    <> • <span className="text-blue-600 dark:text-blue-400">{quiz.pdf.file_name}</span></>
+                                  )}
+                                </p>
+                                <div className="flex items-center flex-wrap gap-2 text-xs">
+                                  <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
+                                    {quiz.total_questions} questions
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded capitalize ${
+                                      quiz.difficulty === 'easy'
+                                        ? 'bg-green-500/20 text-green-400'
+                                        : quiz.difficulty === 'medium'
+                                          ? 'bg-yellow-500/20 text-yellow-400'
+                                          : 'bg-red-500/20 text-red-400'
+                                    }`}
+                                  >
+                                    {quiz.difficulty}
+                                  </span>
+                                  {quiz.pdf?.university && (
+                                    <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
+                                      {quiz.pdf.university}
+                                    </span>
+                                  )}
+                                  {quiz.pdf?.grade && (
+                                    <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
+                                      Grade {quiz.pdf.grade}
+                                    </span>
+                                  )}
+                                  {quiz.pdf?.course_name && (
+                                    <span className="px-2 py-0.5 bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded">
+                                      {quiz.pdf.course_name}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <span className="px-3 py-1 text-xs font-medium rounded-full bg-purple-500/20 text-purple-400 flex-shrink-0">
+                              Quiz
                             </span>
-                            <span className={`px-2 py-0.5 rounded capitalize ${
-                              quiz.difficulty === 'easy'
-                                ? 'bg-green-500/20 text-green-400'
-                                : quiz.difficulty === 'medium'
-                                  ? 'bg-yellow-500/20 text-yellow-400'
-                                  : 'bg-red-500/20 text-red-400'
-                            }`}>
-                              {quiz.difficulty}
-                            </span>
-                            {quiz.pdf?.university && (
-                              <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
-                                {quiz.pdf.university}
-                              </span>
-                            )}
-                            {quiz.pdf?.grade && (
-                              <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
-                                Grade {quiz.pdf.grade}
-                              </span>
-                            )}
-                            {quiz.pdf?.course_name && (
-                              <span className="px-2 py-0.5 bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded">
-                                {quiz.pdf.course_name}
-                              </span>
-                            )}
                           </div>
-                        </div>
-                      </div>
-                      <span className="px-3 py-1 text-xs font-medium rounded-full bg-purple-500/20 text-purple-400 flex-shrink-0">
-                        Quiz
-                      </span>
+
+                          <div className="pt-4 border-t border-gray-200 dark:border-zinc-800 space-y-3">
+                            <div className="flex items-center justify-between">
+                              {/* Stars + average */}
+                              <div className="flex items-center gap-2">
+                                {/* Stars (user's vote) */}
+                                <div className="flex items-center gap-0.5">
+                                  {[1, 2, 3, 4, 5].map((star) => (
+                                    <button
+                                      key={star}
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRateQuiz(quiz.id, star);
+                                      }}
+                                      className="p-0.5"
+                                      title={user ? `Rate ${star} star${star > 1 ? 's' : ''}` : 'Login to rate'}
+                                    >
+                                      <Star
+                                        className={`w-4 h-4 ${
+                                          userRating && userRating >= star
+                                            ? 'text-yellow-400'
+                                            : 'text-gray-300 dark:text-gray-600'
+                                        }`}
+                                      />
+                                    </button>
+                                  ))}
+                                </div>
+                                {/* Average + votes */}
+                                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                                  {ratingStats ? (
+                                    <>
+                                      <span className="font-semibold text-gray-900 dark:text-white">
+                                        {ratingStats.avg.toFixed(1)}
+                                      </span>
+                                      <span className="h-3 w-px bg-gray-300 dark:bg-zinc-700" />
+                                      <span>
+                                        {ratingStats.count} vote{ratingStats.count === 1 ? '' : 's'}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span>No votes yet</span>
+                                  )}
+                                </div>
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/quiz/${quiz.id}`);
+                                }}
+                                className="px-3 py-1.5 bg-gradient-to-r from-blue-500 to-purple-500 text-white text-xs font-medium rounded-md hover:opacity-90 transition-opacity"
+                              >
+                                Start Quiz
+                              </button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })
+                  ) : (
+                    <div className="col-span-2 text-center py-16">
+                      <Brain className="w-20 h-20 text-gray-600 mx-auto mb-4" />
+                      <p className="text-gray-400 text-xl mb-2">
+                        {publicQuizzes.length > 0 ? 'No quizzes match your filters' : 'No public quizzes yet'}
+                      </p>
+                      <p className="text-gray-500 text-sm">
+                        {publicQuizzes.length > 0 ? 'Try adjusting your filters' : 'When users share quizzes publicly, they will appear here!'}
+                      </p>
                     </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/quiz/${quiz.id}`);
-                      }}
-                      className="w-full mt-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
-                    >
-                      Start Quiz
-                    </button>
-                  </motion.div>
-                )) : (
-                  <div className="col-span-2 text-center py-16">
-                    <Brain className="w-20 h-20 text-gray-600 mx-auto mb-4" />
-                    <p className="text-gray-400 text-xl mb-2">
-                      {publicQuizzes.length > 0 ? 'No quizzes match your filters' : 'No public quizzes yet'}
-                    </p>
-                    <p className="text-gray-500 text-sm">
-                      {publicQuizzes.length > 0 ? 'Try adjusting your filters' : 'When users share quizzes publicly, they will appear here!'}
-                    </p>
-                  </div>
-                ))}
+                  )
+                )}
               </div>
             </div>
           )}
