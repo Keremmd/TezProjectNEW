@@ -100,3 +100,74 @@ Exactly ${questionCount} questions. Language: ${language}. Return ONLY the JSON 
     throw new Error('Failed to generate quiz questions: ' + error.message);
   }
 }
+
+/**
+ * Generate flashcard pairs (front/back) from PDF content for study cards.
+ * @param {string} pdfText - Extracted text from PDF
+ * @param {Object} options - { cardCount, language }
+ * @returns {Promise<Array<{ front: string, back: string }>>}
+ */
+export async function generateFlashcardsFromPDF(pdfText, options = {}) {
+  const { cardCount = 12, language = 'Turkish' } = options;
+
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error('GROQ_API_KEY is not set in .env');
+  }
+
+  const prompt = `You are an expert educator. Create ${cardCount} flashcard pairs for studying, based ONLY on the PDF content below. Each card has a "front" (question or term) and "back" (answer or definition). Use ${language}.
+
+RULES:
+- Front: clear question or key term/concept from the text.
+- Back: concise answer or definition, based only on the PDF. Can be 1-3 sentences.
+- No trivia; focus on important concepts, definitions, cause-effect, and "how/why" questions.
+- Each card must be answerable only from the given content.
+
+PDF Content:
+${pdfText.substring(0, 15000)}
+
+Return ONLY valid JSON, no markdown:
+{
+  "cards": [
+    { "front": "Question or term in ${language}", "back": "Answer or definition" }
+  ]
+}
+
+Exactly ${cardCount} cards. Return ONLY the JSON object.`;
+
+  try {
+    const completion = await groq.chat.completions.create({
+      model: GROQ_MODEL,
+      messages: [
+        { role: 'system', content: 'You create study flashcards. Output only valid JSON with a "cards" array of { front, back } objects.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.5,
+      max_tokens: 8192,
+    });
+
+    let text = completion.choices?.[0]?.message?.content || '';
+    if (!text) throw new Error('Groq returned empty response');
+
+    text = text.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('AI did not return valid JSON');
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!parsed.cards || !Array.isArray(parsed.cards)) throw new Error('AI response missing cards array');
+
+    const cards = parsed.cards.map((c) => ({
+      front: typeof c.front === 'string' ? c.front.trim() : String(c.front),
+      back: typeof c.back === 'string' ? c.back.trim() : String(c.back),
+    })).filter((c) => c.front && c.back);
+
+    console.log(`✅ Generated ${cards.length} flashcards (Groq)`);
+    return cards;
+  } catch (error) {
+    console.error('❌ Groq flashcards error:', error.message);
+    const isTokenLimit = error.message?.includes('Request too large') || error.message?.includes('tokens per minute') || error.message?.includes('TPM');
+    if (isTokenLimit) {
+      throw new Error('PDF is too large for the selected number of cards. Try reducing card count (8 or 12) or use a shorter PDF.');
+    }
+    throw new Error('Failed to generate flashcards: ' + error.message);
+  }
+}

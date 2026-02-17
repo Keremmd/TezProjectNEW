@@ -6,6 +6,7 @@ import RegisterPage from './pages/RegisterPage';
 import Dashboard from './pages/Dashboard';
 import PDFViewerPage from './pages/PDFViewerPage';
 import QuizPage from './pages/QuizPage';
+import FlashcardPage from './pages/FlashcardPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -37,6 +38,22 @@ function App() {
             element={
               <ProtectedRoute>
                 <QuizPage />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/flashcards/quiz/:id" 
+            element={
+              <ProtectedRoute>
+                <FlashcardPage mode="quiz" />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/flashcards/deck/:id" 
+            element={
+              <ProtectedRoute>
+                <FlashcardPage mode="deck" />
               </ProtectedRoute>
             } 
           />

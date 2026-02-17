@@ -32,7 +32,8 @@ import {
   Moon,
   MessageCircle,
   ImagePlus,
-  Send
+  Send,
+  Layers
 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -128,6 +129,17 @@ const Dashboard = () => {
   });
   const [creatingQuiz, setCreatingQuiz] = useState(false);
   const [lastScoreByQuizId, setLastScoreByQuizId] = useState({}); // { [quizId]: { score, total_points } }
+
+  // PDF flashcard decks (source_type = 'pdf')
+  const [pdfDecks, setPdfDecks] = useState([]);
+  const [createDeckModalOpen, setCreateDeckModalOpen] = useState(false);
+  const [createDeckPdfId, setCreateDeckPdfId] = useState('');
+  const [createDeckTitle, setCreateDeckTitle] = useState('');
+  const [createDeckCardCount, setCreateDeckCardCount] = useState(12);
+  const [generatingDeck, setGeneratingDeck] = useState(false);
+  const [deleteDeckModalOpen, setDeleteDeckModalOpen] = useState(false);
+  const [deckToDelete, setDeckToDelete] = useState(null);
+  const [deletingDeck, setDeletingDeck] = useState(false);
 
   // Load user profile data when user changes
   useEffect(() => {
@@ -611,6 +623,179 @@ const Dashboard = () => {
     }
   };
 
+  // Load PDF-based flashcard decks
+  const loadPdfDecks = async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('flashcard_decks')
+        .select('id, title, source_id, created_at')
+        .eq('user_id', user.id)
+        .eq('source_type', 'pdf')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setPdfDecks(data || []);
+    } catch (err) {
+      console.error('Error loading PDF flashcard decks:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (user && activeSection === 'flashcards') {
+      loadPdfDecks();
+    }
+  }, [user, activeSection]);
+
+  const handleDeleteDeck = (deck, e) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    setDeckToDelete(deck);
+    setDeleteDeckModalOpen(true);
+  };
+
+  const confirmDeleteDeck = async () => {
+    if (!deckToDelete || !user) return;
+    setDeletingDeck(true);
+    try {
+      const { error } = await supabase
+        .from('flashcard_decks')
+        .delete()
+        .eq('id', deckToDelete.id)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setPdfDecks(prev => prev.filter(d => d.id !== deckToDelete.id));
+      setSuccessMessage({ type: 'success', text: `Deck "${deckToDelete.title}" deleted.` });
+      setTimeout(() => setSuccessMessage(null), 4000);
+      setDeleteDeckModalOpen(false);
+      setDeckToDelete(null);
+    } catch (err) {
+      console.error('Error deleting deck:', err);
+      setSuccessMessage({ type: 'error', text: err.message || 'Failed to delete deck.' });
+      setTimeout(() => setSuccessMessage(null), 5000);
+    } finally {
+      setDeletingDeck(false);
+    }
+  };
+
+  // Create flashcard deck from PDF (AI) - same flow as quiz creation
+  const handleCreateDeckFromPdf = () => {
+    if (!createDeckPdfId || !user) {
+      alert('Please select a PDF');
+      return;
+    }
+    const pdf = userPDFs.find((p) => p.id === createDeckPdfId);
+    if (!pdf) return;
+
+    // IMMEDIATELY close modal and reset
+    setCreateDeckModalOpen(false);
+    const pdfId = createDeckPdfId;
+    const cardCount = createDeckCardCount;
+    const title = createDeckTitle.trim() || pdf.file_name.replace(/\.pdf$/i, '');
+    setCreateDeckPdfId('');
+    setCreateDeckTitle('');
+    setCreateDeckCardCount(12);
+    setGeneratingDeck(true);
+
+    // Show initial message
+    setSuccessMessage({ 
+      type: 'info', 
+      text: '🔄 Creating flashcard deck... This may take 20-40 seconds.' 
+    });
+
+    // Create deck in background
+    fetch('http://localhost:3001/api/flashcards/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pdfId,
+        cardCount,
+        language: 'Turkish',
+      }),
+    })
+    .then(async (res) => {
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        if (res.status === 404) {
+          throw new Error('Backend endpoint not found. Make sure backend is running on port 3001.');
+        }
+        throw new Error(errorData.error || `Server error (${res.status}): Failed to generate flashcards`);
+      }
+      return await res.json();
+    })
+    .then(async (data) => {
+      const finalTitle = title || data.title || pdf.file_name.replace(/\.pdf$/i, '');
+      const cards = data.cards || [];
+
+      if (cards.length === 0) {
+        throw new Error('No cards generated. Please try again.');
+      }
+
+      // Create deck in Supabase
+      const { data: deck, error: deckErr } = await supabase
+        .from('flashcard_decks')
+        .insert({
+          user_id: user.id,
+          title: finalTitle,
+          source_type: 'pdf',
+          source_id: pdfId,
+        })
+        .select('id')
+        .single();
+
+      if (deckErr || !deck) throw new Error(deckErr?.message || 'Failed to create deck');
+
+      // Insert all cards
+      for (let i = 0; i < cards.length; i++) {
+        const { error: cardErr } = await supabase.from('flashcards').insert({
+          deck_id: deck.id,
+          front: cards[i].front,
+          back: cards[i].back,
+          order_index: i,
+        });
+        if (cardErr) throw cardErr;
+      }
+
+      // Success!
+      setSuccessMessage({ 
+        type: 'success', 
+        text: `✅ Deck "${finalTitle}" created! ${cards.length} cards ready.` 
+      });
+      setTimeout(() => setSuccessMessage(null), 5000);
+      loadPdfDecks();
+      
+      // Navigate to the deck after a short delay
+      setTimeout(() => {
+        navigate(`/flashcards/deck/${deck.id}`);
+      }, 1000);
+    })
+    .catch((err) => {
+      console.error('❌ Deck creation error:', err);
+      const isQuota = err.message?.includes('quota') || err.message?.includes('Too Many Requests');
+      const isTokenLimit = err.message?.includes('Request too large') || err.message?.includes('tokens per minute') || err.message?.includes('TPM');
+      
+      let errorMsg = err.message || 'Failed to create deck. Try again.';
+      if (isTokenLimit) {
+        errorMsg = 'PDF is too large. Try reducing the number of cards (8 or 12) or use a shorter PDF.';
+      } else if (isQuota) {
+        errorMsg = err.message || 'API quota exceeded. Please try again later.';
+      }
+      
+      setSuccessMessage({ 
+        type: 'error', 
+        text: errorMsg
+      });
+      setTimeout(() => setSuccessMessage(null), 8000);
+    })
+    .finally(() => {
+      setGeneratingDeck(false);
+    });
+  };
+
   // Create new quiz — only place we call AI (Gemini); no auto/polling requests
   const handleCreateQuiz = () => {
     // Validate
@@ -1056,7 +1241,7 @@ const Dashboard = () => {
         setSelectedCourse(revertedCourse);
       }
       
-      setSuccessMessage('Failed to update completion status');
+      setSuccessMessage({ type: 'error', text: 'Failed to update completion status' });
       setTimeout(() => setSuccessMessage(null), 3000);
     }
   };
@@ -1127,12 +1312,12 @@ const Dashboard = () => {
       loadUserCourses();
 
       // Show success message
-      setSuccessMessage('Course deleted successfully!');
-      setTimeout(() => setSuccessMessage(null), 3000);
+      setSuccessMessage({ type: 'success', text: `✅ Course "${courseToDelete.title}" deleted.` });
+      setTimeout(() => setSuccessMessage(null), 4000);
     } catch (error) {
       console.error('Error deleting course:', error);
-      setSuccessMessage('Failed to delete course: ' + error.message);
-      setTimeout(() => setSuccessMessage(null), 3000);
+      setSuccessMessage({ type: 'error', text: 'Failed to delete course: ' + error.message });
+      setTimeout(() => setSuccessMessage(null), 5000);
     }
   };
 
@@ -1198,8 +1383,8 @@ const Dashboard = () => {
       loadUserCourses();
 
       // Show success message
-      setSuccessMessage('Course created successfully!');
-      setTimeout(() => setSuccessMessage(null), 3000);
+      setSuccessMessage({ type: 'success', text: `✅ Course "${courseData.title}" created.` });
+      setTimeout(() => setSuccessMessage(null), 4000);
     } catch (error) {
       console.error('Error creating course:', error);
       alert('Failed to create course: ' + error.message);
@@ -1228,16 +1413,23 @@ const Dashboard = () => {
 
       // Close modal and refresh
       setDeleteModalOpen(false);
+      const deletedFileName = pdfToDelete.file_name;
       setPdfToDelete(null);
       loadUserPDFs();
       
       // Show success message
-      setSuccessMessage('PDF deleted successfully!');
-      setTimeout(() => setSuccessMessage(null), 3000);
+      setSuccessMessage({ 
+        type: 'success', 
+        text: `✅ PDF "${deletedFileName}" deleted.` 
+      });
+      setTimeout(() => setSuccessMessage(null), 4000);
     } catch (error) {
       console.error('Error deleting PDF:', error);
-      setSuccessMessage('Failed to delete PDF: ' + error.message);
-      setTimeout(() => setSuccessMessage(null), 3000);
+      setSuccessMessage({ 
+        type: 'error', 
+        text: 'Failed to delete PDF: ' + error.message 
+      });
+      setTimeout(() => setSuccessMessage(null), 5000);
     }
   };
 
@@ -1342,6 +1534,7 @@ const Dashboard = () => {
     { id: 'pdfs', icon: FileText, label: 'My PDFs' },
     { id: 'courses', icon: BookOpen, label: 'My Courses' },
     { id: 'quizzes', icon: Brain, label: 'My Quizzes' },
+    { id: 'flashcards', icon: Layers, label: 'Flashcards' },
     { id: 'shared', icon: Share2, label: 'Shared Content' },
     { id: 'community', icon: MessageCircle, label: 'Community' },
     { id: 'settings', icon: Settings, label: 'Settings' },
@@ -1496,13 +1689,13 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 dark:bg-black flex">
-      {/* Sidebar */}
+    <div className="h-screen overflow-hidden bg-gray-100 dark:bg-black flex">
+      {/* Sidebar - fixed height so Logout stays at bottom of viewport */}
       <motion.aside
         initial={{ x: -300 }}
         animate={{ x: 0, width: sidebarCollapsed ? '5rem' : '16rem' }}
         transition={{ duration: 0.3 }}
-        className={`fixed lg:static inset-y-0 left-0 z-50 bg-white dark:bg-zinc-900 border-r border-gray-200 dark:border-zinc-800 transform ${
+        className={`fixed lg:static inset-y-0 left-0 z-50 h-screen flex-shrink-0 bg-white dark:bg-zinc-900 border-r border-gray-200 dark:border-zinc-800 transform ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0 transition-transform duration-300`}
       >
@@ -1582,8 +1775,8 @@ const Dashboard = () => {
         </div>
       </motion.aside>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-h-screen">
+      {/* Main Content - only this area scrolls */}
+      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
         {/* Top Bar */}
         <header className="bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800 sticky top-0 z-40">
           <div className="flex items-center justify-between px-6 py-4">
@@ -1919,13 +2112,28 @@ const Dashboard = () => {
                     </div>
 
                       {/* Actions */}
-                      <div className="flex items-center space-x-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <button 
                           onClick={() => navigate(`/pdf/${pdf.id}`)}
-                          className="flex-1 px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-sm font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
+                          className="flex-1 min-w-0 px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-sm font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
                         >
                           Open
                         </button>
+                        {pdf.status === 'completed' && (
+                          <button
+                            onClick={() => {
+                              setCreateDeckPdfId(pdf.id);
+                              setCreateDeckTitle(pdf.file_name.replace(/\.pdf$/i, ''));
+                              setCreateDeckCardCount(12);
+                              setCreateDeckModalOpen(true);
+                            }}
+                            className="px-3 py-2 border-2 border-purple-300 dark:border-purple-600 text-purple-600 dark:text-purple-400 text-sm font-medium rounded-lg hover:bg-purple-50 dark:hover:bg-purple-500/10 transition-colors flex items-center gap-1.5"
+                            title="Create flashcard deck from this PDF"
+                          >
+                            <Layers className="w-4 h-4" />
+                            Cards
+                          </button>
+                        )}
                         <button 
                           onClick={() => handleDownload(pdf)}
                           className="p-2 border-2 border-gray-300 dark:border-zinc-700 text-gray-600 dark:text-gray-400 rounded-lg hover:text-gray-900 dark:hover:text-white hover:border-gray-400 dark:hover:border-zinc-600 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
@@ -2155,6 +2363,17 @@ const Dashboard = () => {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
+                            navigate(`/flashcards/quiz/${quiz.id}`);
+                          }}
+                          className="px-4 py-2 border-2 border-gray-300 dark:border-zinc-600 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors flex items-center gap-1.5"
+                          title="Study as flashcards"
+                        >
+                          <Layers className="w-4 h-4" />
+                          Study cards
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
                             handleDeleteQuiz(quiz);
                           }}
                           className="p-2 border-2 border-gray-300 dark:border-transparent text-gray-600 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-zinc-800 rounded-lg transition-colors"
@@ -2179,6 +2398,116 @@ const Dashboard = () => {
                     </button>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {activeSection === 'flashcards' && (
+            <div className="space-y-8">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Flashcards</h1>
+                  <p className="text-gray-600 dark:text-gray-400">Study from quiz decks or create decks from any PDF.</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setCreateDeckPdfId('');
+                    setCreateDeckTitle('');
+                    setCreateDeckCardCount(12);
+                    setCreateDeckModalOpen(true);
+                  }}
+                  className="px-6 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-lg font-semibold hover:opacity-90 transition-opacity flex items-center gap-2"
+                >
+                  <Layers className="w-5 h-5" />
+                  Create deck from PDF
+                </button>
+              </div>
+
+              {/* From PDFs */}
+              {(pdfDecks.length > 0) && (
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">From PDFs</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {pdfDecks.map((deck) => (
+                      <motion.div
+                        key={deck.id}
+                        whileHover={{ scale: 1.02 }}
+                        className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-purple-400 dark:hover:border-purple-500 transition-all relative group"
+                      >
+                        {/* Delete deck button */}
+                        <button
+                          onClick={(e) => handleDeleteDeck(deck, e)}
+                          className="absolute top-3 right-3 p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                          title="Delete this deck"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+
+                        <div className="flex items-start gap-4">
+                          <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center flex-shrink-0">
+                            <FileText className="w-6 h-6 text-white" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">{deck.title}</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">PDF deck</p>
+                            <button
+                              onClick={() => navigate(`/flashcards/deck/${deck.id}`)}
+                              className="mt-4 px-4 py-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
+                            >
+                              Study deck
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* From Quizzes */}
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">From Quizzes</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {quizzes.length > 0 ? (
+                    quizzes.map((quiz) => (
+                      <motion.div
+                        key={quiz.id}
+                        whileHover={{ scale: 1.02 }}
+                        className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-purple-400 dark:hover:border-purple-500 transition-all"
+                      >
+                        <div className="flex items-start gap-4">
+                          <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
+                            <Layers className="w-6 h-6 text-white" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">{quiz.title}</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                              {quiz.total_questions} cards
+                            </p>
+                            <button
+                              onClick={() => navigate(`/flashcards/quiz/${quiz.id}`)}
+                              className="mt-4 px-4 py-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
+                            >
+                              Study deck
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))
+                  ) : (
+                    <div className="col-span-full text-center py-12 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl">
+                      <Brain className="w-16 h-16 text-gray-400 mx-auto mb-3" />
+                      <p className="text-gray-600 dark:text-gray-400 mb-2">No quiz decks yet</p>
+                      <p className="text-gray-500 text-sm mb-4">Create a quiz from My Quizzes to study as cards.</p>
+                      <button
+                        onClick={() => setActiveSection('quizzes')}
+                        className="px-4 py-2 text-purple-500 dark:text-purple-400 font-medium hover:underline"
+                      >
+                        Go to My Quizzes
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -3543,6 +3872,184 @@ const Dashboard = () => {
         </div>
       )}
 
+      {/* Create flashcard deck from PDF modal */}
+      {createDeckModalOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border-2 border-zinc-800 rounded-2xl p-8 max-w-2xl w-full my-8"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-white">Create deck from PDF</h2>
+              <button
+                onClick={() => !generatingDeck && setCreateDeckModalOpen(false)}
+                className="p-2 text-gray-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Select PDF */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-3">
+                  Select PDF *
+                </label>
+                <div className="max-h-64 overflow-y-auto space-y-2 bg-zinc-800/50 rounded-xl p-4 border border-zinc-700">
+                  {userPDFs.filter((p) => p.status === 'completed').length > 0 ? (
+                    userPDFs.filter((p) => p.status === 'completed').map((pdf) => (
+                      <button
+                        key={pdf.id}
+                        onClick={() => {
+                          setCreateDeckPdfId(pdf.id);
+                          setCreateDeckTitle(pdf.file_name.replace(/\.pdf$/i, ''));
+                        }}
+                        className={`w-full text-left p-4 rounded-lg transition-all ${
+                          createDeckPdfId === pdf.id
+                            ? 'bg-gradient-to-r from-purple-500/20 to-blue-500/20 border-2 border-purple-500'
+                            : 'bg-zinc-800 hover:bg-zinc-750 border-2 border-transparent'
+                        }`}
+                      >
+                        <div className="flex items-center space-x-3">
+                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                            createDeckPdfId === pdf.id
+                              ? 'bg-gradient-to-br from-purple-500 to-blue-500'
+                              : 'bg-zinc-700'
+                          }`}>
+                            <FileText className="w-5 h-5 text-white" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white font-medium text-sm truncate">{pdf.file_name}</p>
+                            <p className="text-xs text-gray-400 truncate">
+                              {pdf.course_name || 'No course'} • {pdf.university || 'No university'}
+                            </p>
+                          </div>
+                          {createDeckPdfId === pdf.id && (
+                            <CheckCircle className="w-5 h-5 text-purple-400 flex-shrink-0" />
+                          )}
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="text-center py-8">
+                      <FileText className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+                      <p className="text-gray-400">No completed PDFs available. Upload and process some PDFs first!</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Deck Title */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Deck Title
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., Chapter 1 Flashcards"
+                  value={createDeckTitle}
+                  onChange={(e) => setCreateDeckTitle(e.target.value)}
+                  className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                />
+              </div>
+
+              {/* Number of Cards */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-3">
+                  Number of Cards
+                </label>
+                <div className="grid grid-cols-4 gap-3">
+                  {[8, 12, 16, 20].map((count) => (
+                    <button
+                      key={count}
+                      onClick={() => setCreateDeckCardCount(count)}
+                      className={`px-4 py-3 rounded-xl font-semibold transition-all ${
+                        createDeckCardCount === count
+                          ? 'bg-gradient-to-r from-purple-500 to-blue-500 text-white'
+                          : 'bg-zinc-800 text-gray-400 hover:bg-zinc-700'
+                      }`}
+                    >
+                      {count}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={() => !generatingDeck && setCreateDeckModalOpen(false)}
+                  disabled={generatingDeck}
+                  className="flex-1 px-6 py-3 bg-zinc-800 text-white rounded-xl font-semibold hover:bg-zinc-700 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateDeckFromPdf}
+                  disabled={generatingDeck || !createDeckPdfId}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {generatingDeck ? (
+                    <div className="flex items-center justify-center space-x-2">
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Generating Deck...</span>
+                    </div>
+                  ) : (
+                    <span>Generate Deck</span>
+                  )}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Delete PDF deck modal */}
+      {deleteDeckModalOpen && deckToDelete && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border-2 border-zinc-800 rounded-2xl p-8 max-w-md w-full"
+          >
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-2">Delete Deck?</h3>
+              <p className="text-gray-400">
+                Are you sure you want to delete the deck{' '}
+                <span className="font-semibold text-white">"{deckToDelete.title}"</span>?
+              </p>
+              <p className="text-sm text-gray-500 mt-2">
+                All cards in this deck will be removed. This action cannot be undone.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  if (deletingDeck) return;
+                  setDeleteDeckModalOpen(false);
+                  setDeckToDelete(null);
+                }}
+                disabled={deletingDeck}
+                className="flex-1 px-6 py-3 bg-zinc-800 text-white rounded-xl font-semibold hover:bg-zinc-700 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteDeck}
+                disabled={deletingDeck}
+                className="flex-1 px-6 py-3 bg-red-500 text-white rounded-xl font-semibold hover:bg-red-600 transition-colors disabled:opacity-50"
+              >
+                {deletingDeck ? 'Deleting...' : 'Delete deck'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
       {/* Delete Course Modal */}
       {deleteCourseModalOpen && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -3854,7 +4361,7 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Success/Error Toast */}
+      {/* Success/Error/Info Toast */}
       {successMessage && (
         <motion.div
           initial={{ opacity: 0, y: -50 }}
@@ -3863,15 +4370,19 @@ const Dashboard = () => {
           className={`fixed top-6 right-6 z-50 px-6 py-4 rounded-xl shadow-2xl flex items-center space-x-3 max-w-md ${
             successMessage.type === 'error'
               ? 'bg-gradient-to-r from-red-500 to-rose-500'
+              : successMessage.type === 'info'
+              ? 'bg-gradient-to-r from-blue-500 to-cyan-500'
               : 'bg-gradient-to-r from-green-500 to-emerald-500'
           }`}
         >
           {successMessage.type === 'error' ? (
             <AlertCircle className="w-6 h-6 flex-shrink-0" />
+          ) : successMessage.type === 'info' ? (
+            <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin flex-shrink-0" />
           ) : (
             <CheckCircle className="w-6 h-6 flex-shrink-0" />
           )}
-          <p className="font-semibold">{successMessage.text}</p>
+          <p className="font-semibold text-white">{successMessage.text}</p>
         </motion.div>
       )}
 

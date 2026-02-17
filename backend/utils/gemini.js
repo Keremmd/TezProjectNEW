@@ -162,3 +162,55 @@ Return the response in this EXACT JSON format (no markdown):
     throw new Error('Failed to analyze PDF: ' + error.message);
   }
 }
+
+/**
+ * Generate flashcard pairs (front/back) from PDF content.
+ * @param {string} pdfText - Extracted text from PDF
+ * @param {Object} options - { cardCount, language }
+ * @returns {Promise<Array<{ front: string, back: string }>>}
+ */
+export async function generateFlashcardsFromPDF(pdfText, options = {}) {
+  const { cardCount = 12, language = 'Turkish' } = options;
+
+  const model = getGeminiModel();
+
+  const prompt = `You are an expert educator. Create ${cardCount} flashcard pairs for studying, based ONLY on the PDF content below. Each card has a "front" (question or term) and "back" (answer or definition). Use ${language}.
+
+RULES:
+- Front: clear question or key term/concept from the text.
+- Back: concise answer or definition, based only on the PDF. Can be 1-3 sentences.
+- No trivia; focus on important concepts, definitions, cause-effect, and "how/why" questions.
+- Each card must be answerable only from the given content.
+
+PDF Content:
+${pdfText.substring(0, 20000)}
+
+Return ONLY valid JSON, no markdown:
+{
+  "cards": [
+    { "front": "Question or term in ${language}", "back": "Answer or definition" }
+  ]
+}
+
+Exactly ${cardCount} cards. Return ONLY the JSON object.`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    let text = response.text();
+    text = text.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('AI did not return valid JSON');
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!parsed.cards || !Array.isArray(parsed.cards)) throw new Error('AI response missing cards array');
+    const cards = parsed.cards.map((c) => ({
+      front: typeof c.front === 'string' ? c.front.trim() : String(c.front),
+      back: typeof c.back === 'string' ? c.back.trim() : String(c.back),
+    })).filter((c) => c.front && c.back);
+    console.log(`✅ Generated ${cards.length} flashcards (Gemini)`);
+    return cards;
+  } catch (error) {
+    console.error('❌ Gemini flashcards error:', error.message);
+    throw new Error('Failed to generate flashcards: ' + error.message);
+  }
+}

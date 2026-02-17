@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import quizRoutes from './routes/quiz.js';
 import analyzeRoutes from './routes/analyze.js';
+import flashcardRoutes from './routes/flashcards.js';
 
 dotenv.config();
 
@@ -17,6 +18,7 @@ app.use(express.urlencoded({ extended: true }));
 // Routes
 app.use('/api/quiz', quizRoutes);
 app.use('/api/analyze', analyzeRoutes);
+app.use('/api/flashcards', flashcardRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -41,6 +43,7 @@ app.listen(PORT, () => {
   console.log(`📚 API endpoints:`);
   console.log(`   - POST /api/quiz/generate`);
   console.log(`   - POST /api/analyze/pdf`);
+  console.log(`   - POST /api/flashcards/generate`);
   console.log(`   - GET  /api/health`);
   
   if (!process.env.GEMINI_API_KEY) {
