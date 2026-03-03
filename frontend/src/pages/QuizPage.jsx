@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
@@ -26,6 +26,7 @@ const QuizPage = () => {
   const [showResults, setShowResults] = useState(false);
   const [loading, setLoading] = useState(true);
   const [timeElapsed, setTimeElapsed] = useState(0);
+  const autoSubmittedRef = useRef(false);
 
   useEffect(() => {
     loadQuiz();
@@ -40,6 +41,17 @@ const QuizPage = () => {
       return () => clearInterval(timer);
     }
   }, [showResults, quiz]);
+
+  // Auto-submit when time limit (if any) is reached
+  const timeLimitSeconds = quiz?.time_limit ? quiz.time_limit * 60 : null;
+
+  useEffect(() => {
+    if (!quiz || showResults || autoSubmittedRef.current || timeLimitSeconds == null) return;
+    if (timeElapsed >= timeLimitSeconds) {
+      autoSubmittedRef.current = true;
+      handleSubmit();
+    }
+  }, [timeElapsed, timeLimitSeconds, quiz, showResults]);
 
   const loadQuiz = async () => {
     try {
@@ -181,7 +193,11 @@ const QuizPage = () => {
             <div className="flex items-center space-x-6">
               <div className="flex items-center space-x-2 text-gray-600 dark:text-gray-400">
                 <Clock className="w-5 h-5" />
-                <span>{formatTime(timeElapsed)}</span>
+                <span>
+                  {timeLimitSeconds != null
+                    ? `${formatTime(Math.max(0, timeLimitSeconds - timeElapsed))} kaldı`
+                    : formatTime(timeElapsed)}
+                </span>
               </div>
               <div className="text-sm text-gray-600 dark:text-gray-400">
                 Question {currentQuestionIndex + 1} / {questions.length}

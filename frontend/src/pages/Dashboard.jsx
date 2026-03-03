@@ -125,7 +125,8 @@ const Dashboard = () => {
     title: '',
     questionCount: 10,
     difficulty: 'medium',
-    privacy: 'private'
+    privacy: 'private',
+    timeLimitMinutes: null
   });
   const [creatingQuiz, setCreatingQuiz] = useState(false);
   const [lastScoreByQuizId, setLastScoreByQuizId] = useState({}); // { [quizId]: { score, total_points } }
@@ -804,19 +805,27 @@ const Dashboard = () => {
       return;
     }
 
-    // Save data (include privacy so backend saves it)
+    // Save data (include privacy and time limit so backend saves it)
     const quizData = {
       pdfId: newQuizData.pdfId,
       userId: user.id,
       title: newQuizData.title,
       questionCount: newQuizData.questionCount,
       difficulty: newQuizData.difficulty,
-      privacy: newQuizData.privacy || 'private'
+      privacy: newQuizData.privacy || 'private',
+      timeLimitMinutes: newQuizData.timeLimitMinutes
     };
     
     // IMMEDIATELY close modal and reset
     setNewQuizModalOpen(false);
-    setNewQuizData({ pdfId: '', title: '', questionCount: 10, difficulty: 'medium', privacy: 'private' });
+    setNewQuizData({ 
+      pdfId: '', 
+      title: '', 
+      questionCount: 10, 
+      difficulty: 'medium', 
+      privacy: 'private',
+      timeLimitMinutes: null
+    });
     setCreatingQuiz(true);
     
     // Create quiz in background
@@ -2341,6 +2350,14 @@ const Dashboard = () => {
                             }`}>
                               {quiz.difficulty}
                             </span>
+                            {quiz.time_limit != null && (
+                              <>
+                                <span>•</span>
+                                <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded text-xs">
+                                  Time limit: {quiz.time_limit} min
+                                </span>
+                              </>
+                            )}
                             {quiz.pdf && (
                               <>
                                 <span>•</span>
@@ -2812,6 +2829,11 @@ const Dashboard = () => {
                                   >
                                     {quiz.difficulty}
                                   </span>
+                                  {quiz.time_limit != null && (
+                                    <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
+                                      Time limit: {quiz.time_limit} min
+                                    </span>
+                                  )}
                                   {quiz.pdf?.university && (
                                     <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
                                       {quiz.pdf.university}
@@ -3697,7 +3719,9 @@ const Dashboard = () => {
                     pdfId: '',
                     title: '',
                     questionCount: 10,
-                    difficulty: 'medium'
+                    difficulty: 'medium',
+                    privacy: 'private',
+                    timeLimitMinutes: null
                   });
                 }}
                 className="p-2 text-gray-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
@@ -3811,6 +3835,38 @@ const Dashboard = () => {
                 </div>
               </div>
 
+              {/* Time Limit */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-3">
+                  Time Limit (minutes)
+                </label>
+                <div className="grid grid-cols-4 gap-3">
+                  {[5, 10, 15, 20].map((mins) => (
+                    <button
+                      key={mins}
+                      onClick={() =>
+                        setNewQuizData((prev) => ({
+                          ...prev,
+                          timeLimitMinutes: prev.timeLimitMinutes === mins ? null : mins
+                        }))
+                      }
+                      className={`px-4 py-3 rounded-xl font-semibold transition-all ${
+                        newQuizData.timeLimitMinutes === mins
+                          ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white'
+                          : 'bg-zinc-800 text-gray-400 hover:bg-zinc-700'
+                      }`}
+                    >
+                      {mins} dk
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-gray-500">
+                  {newQuizData.timeLimitMinutes
+                    ? `${newQuizData.timeLimitMinutes} minutes selected. The quiz will be submitted automatically when time is up.`
+                    : 'If you do not select a time limit, the quiz will have no time limit.'}
+                </p>
+              </div>
+
               {/* Visibility */}
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-3">
@@ -3845,7 +3901,9 @@ const Dashboard = () => {
                       pdfId: '',
                       title: '',
                       questionCount: 10,
-                      difficulty: 'medium'
+                      difficulty: 'medium',
+                      privacy: 'private',
+                      timeLimitMinutes: null
                     });
                   }}
                   className="flex-1 px-6 py-3 bg-zinc-800 text-white rounded-xl font-semibold hover:bg-zinc-700 transition-colors"

@@ -7,11 +7,11 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 /**
  * Get Gemini model instance.
- * Model can be overridden via .env: GEMINI_MODEL=gemini-2.5-pro
+ * Model can be overridden via .env: GEMINI_MODEL=gemini-2.5-flash
  * If you get "limit: 0" / 429: this project has no free-tier quota — create a new
  * project in https://aistudio.google.com and use its API key, or enable billing.
  */
-const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
+const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 export function getGeminiModel(modelName = DEFAULT_MODEL) {
   console.log(`🤖 Using Gemini model: ${modelName}`);
   return genAI.getGenerativeModel({ 
@@ -160,6 +160,51 @@ Return the response in this EXACT JSON format (no markdown):
   } catch (error) {
     console.error('Error analyzing PDF:', error);
     throw new Error('Failed to analyze PDF: ' + error.message);
+  }
+}
+
+/**
+ * Answer a user's question about a PDF, strictly using ONLY the PDF content.
+ * If the answer is not clearly in the PDF, respond that it cannot be answered.
+ * @param {string} pdfText - Extracted text from PDF
+ * @param {string} question - User's question
+ * @returns {Promise<string>} Answer in Turkish, grounded in the PDF
+ */
+export async function answerQuestionAboutPDF(pdfText, question) {
+  // For Q&A we explicitly force the flash model for speed and cost
+  const model = getGeminiModel('gemini-2.5-flash');
+
+  const prompt = `Sen, öğrencilere yardımcı olan çok dikkatli bir asistanısın.
+
+SADECE aşağıdaki PDF içeriğine dayanarak cevap verebilirsin.
+- Eğer soru PDF'de açık ve net bir şekilde yanıtlanmıyorsa, şu cümleyi aynen yaz:
+- "Bu soru, verilen PDF içeriğine dayanarak yanıtlanamıyor."
+- PDF dışı genel bilgi, tahmin veya yorum ekleme.
+- Cevaplarını Türkçe yaz.
+
+--- PDF İÇERİĞİ (sadece buraya dayan, dış bilgi kullanma) ---
+${pdfText.substring(0, 20000)}
+--- PDF İÇERİĞİ SONU ---
+
+Kullanıcının sorusu:
+${question}
+
+PDF'ye dayanarak Türkçe cevabın:`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    let text = response.text() || '';
+
+    // Temizlik: olası markdown veya code fence kaldır
+    text = text
+      .replace(/```(?:markdown|text)?/gi, '')
+      .trim();
+
+    return text;
+  } catch (error) {
+    console.error('Error answering PDF question:', error);
+    throw new Error('Failed to answer question about PDF: ' + error.message);
   }
 }
 

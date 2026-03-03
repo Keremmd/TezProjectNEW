@@ -56,7 +56,8 @@ router.post('/generate', async (req, res) => {
       title, 
       questionCount = 10, 
       difficulty = 'medium',
-      privacy = 'private'
+      privacy = 'private',
+      timeLimitMinutes = null
     } = req.body;
 
     if (!pdfId || !userId || !title) {
@@ -136,16 +137,22 @@ router.post('/generate', async (req, res) => {
     console.log(`✅ Questions generated, creating quiz in DB...`);
 
     // Create quiz in database
+    const insertPayload = {
+      user_id: userId,
+      pdf_id: pdfId,
+      title,
+      difficulty,
+      total_questions: questions.length,
+      privacy
+    };
+
+    if (timeLimitMinutes != null && Number(timeLimitMinutes) > 0) {
+      insertPayload.time_limit = Number(timeLimitMinutes);
+    }
+
     const { data: quiz, error: quizError } = await supabase
       .from('quizzes')
-      .insert({
-        user_id: userId,
-        pdf_id: pdfId,
-        title,
-        difficulty,
-        total_questions: questions.length,
-        privacy
-      })
+      .insert(insertPayload)
       .select()
       .single();
 
@@ -196,7 +203,8 @@ router.post('/generate', async (req, res) => {
         id: quiz.id,
         title: quiz.title,
         difficulty: quiz.difficulty,
-        total_questions: quiz.total_questions
+        total_questions: quiz.total_questions,
+        time_limit: quiz.time_limit ?? insertPayload.time_limit ?? null
       },
       message: `Successfully generated ${questions.length} AI questions`
     });

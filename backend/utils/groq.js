@@ -69,26 +69,23 @@ Exactly ${questionCount} questions. Language: ${language}. Return ONLY the JSON 
       ],
       temperature: 0.6,
       max_tokens: 16384,
+      // Ask Groq to return a strict JSON object so parsing is reliable
+      response_format: { type: 'json_object' },
     });
 
-    let text = completion.choices?.[0]?.message?.content || '';
-    if (!text) throw new Error('Groq returned empty response');
+    const content = completion.choices?.[0]?.message?.content || '';
+    if (!content) throw new Error('Groq returned empty response');
 
-    console.log('📝 Raw AI response length:', text.length);
+    console.log('📝 Raw AI response length:', content.length);
 
-    text = text
-      .replace(/```json\n?/gi, '')
-      .replace(/```javascript\n?/gi, '')
-      .replace(/```\n?/g, '')
-      .trim();
-
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error('No JSON found in response:', text.substring(0, 500));
-      throw new Error('AI did not return valid JSON format');
+    let jsonResponse;
+    try {
+      jsonResponse = JSON.parse(content);
+    } catch (parseError) {
+      console.error('❌ Groq JSON parse error:', parseError);
+      console.error('First 500 chars of response:', content.substring(0, 500));
+      throw new Error(parseError.message || 'Invalid JSON from Groq');
     }
-
-    const jsonResponse = JSON.parse(jsonMatch[0]);
     if (!jsonResponse.questions || !Array.isArray(jsonResponse.questions)) {
       throw new Error('AI response missing questions array');
     }
@@ -169,5 +166,58 @@ Exactly ${cardCount} cards. Return ONLY the JSON object.`;
       throw new Error('PDF is too large for the selected number of cards. Try reducing card count (8 or 12) or use a shorter PDF.');
     }
     throw new Error('Failed to generate flashcards: ' + error.message);
+  }
+}
+
+/**
+ * Answer a user's question about a PDF using Groq,
+ * strictly grounded ONLY in the PDF content.
+ * @param {string} pdfText
+ * @param {string} question
+ * @returns {Promise<string>}
+ */
+export async function answerQuestionAboutPDF(pdfText, question) {
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error('GROQ_API_KEY is not set in .env');
+  }
+
+  const systemPrompt = `Sen, öğrencilere yardımcı olan çok dikkatli bir asistansın.
+
+KURALLAR:
+- SADECE verilen PDF metnine dayanarak cevap verebilirsin.
+- Eğer soru PDF'de açık ve net bir şekilde yanıtlanmıyorsa, şu cümleyi aynen yaz:
+- "Bu soru, verilen PDF içeriğine dayanarak yanıtlanamıyor."
+- PDF dışı genel bilgi, tahmin veya yorum ekleme.
+- Cevaplarını her zaman Türkçe yaz.`;
+
+  const userPrompt = `--- PDF İÇERİĞİ (sadece buraya dayan, dış bilgi kullanma) ---
+${pdfText.substring(0, 20000)}
+--- PDF İÇERİĞİ SONU ---
+
+Kullanıcının sorusu:
+${question}
+
+Lütfen PDF'ye dayanarak Türkçe bir cevap ver. Kuralları unutma.`;
+
+  try {
+    console.log(`🤖 Using Groq model for PDF Q&A: ${GROQ_MODEL}`);
+    const completion = await groq.chat.completions.create({
+      model: GROQ_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.4,
+      max_tokens: 2048,
+    });
+
+    const text = completion.choices?.[0]?.message?.content?.trim();
+    if (!text) {
+      throw new Error('Groq returned empty response');
+    }
+    return text;
+  } catch (error) {
+    console.error('❌ Groq PDF Q&A error:', error.message);
+    throw new Error('Failed to answer question about PDF: ' + error.message);
   }
 }
