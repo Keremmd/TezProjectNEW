@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { useAuth } from '../contexts/AuthContext';
+import { useI18n } from '../contexts/I18nContext';
 import { supabase } from '../lib/supabase';
 import {
   ChevronLeft,
@@ -23,6 +24,7 @@ const PDFViewerPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { t, language } = useI18n();
   const [pdf, setPdf] = useState(null);
   const [pdfUrl, setPdfUrl] = useState(null);
   const [numPages, setNumPages] = useState(null);
@@ -102,8 +104,8 @@ const PDFViewerPage = () => {
       const title = pdf.file_name || 'this PDF';
       const course = pdf.course_name || '';
       const intro = course
-        ? `Hello! I'm your AI assistant. I can help you understand "${title}" for the course "${course}". Ask me anything about this PDF!`
-        : `Hello! I'm your AI assistant. I can help you understand "${title}". Ask me anything about this PDF!`;
+        ? t('pdf_ai_welcome_with_course', { title, course })
+        : t('pdf_ai_welcome_without_course', { title });
 
       setChatMessages([{
         id: 'welcome',
@@ -111,7 +113,7 @@ const PDFViewerPage = () => {
         text: intro
       }]);
     }
-  }, [pdf, user]);
+  }, [pdf, user, t]);
 
   // Persist chat history so it survives refresh / leave-page / come-back
   useEffect(() => {
@@ -191,7 +193,7 @@ const PDFViewerPage = () => {
       const errorMessage = {
         id: `ai-error-${Date.now()}`,
         sender: 'ai',
-        text: 'Üzgünüm, şu anda bu soruya yanıt verirken bir hata oluştu. Lütfen biraz sonra tekrar dene.'
+        text: t('pdf_ai_error_generic')
       };
       setChatMessages(prev => [...prev, errorMessage]);
     } finally {
@@ -307,9 +309,11 @@ const PDFViewerPage = () => {
           <div className="w-[480px] flex flex-col bg-white dark:bg-zinc-900 border-2 border-gray-300 dark:border-zinc-700 rounded-2xl overflow-hidden max-h-[calc(100vh-200px)]">
             {/* Chat Header */}
             <div className="p-6 border-b border-gray-200 dark:border-zinc-800">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">AI Assistant</h2>
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+                {t('pdf_ai_title')}
+              </h2>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Ask questions about this PDF. Answers are based only on the opened document.
+                {t('pdf_ai_subtitle')}
               </p>
             </div>
 
@@ -349,7 +353,7 @@ const PDFViewerPage = () => {
               <div className="flex gap-2">
                 <input
                   type="text"
-                  placeholder="Ask a question about this PDF..."
+                  placeholder={t('pdf_ai_input_placeholder')}
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -365,7 +369,7 @@ const PDFViewerPage = () => {
                   disabled={chatLoading || !chatInput.trim()}
                   className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {chatLoading ? 'Sending...' : 'Send'}
+                  {chatLoading ? t('pdf_ai_sending') : t('pdf_ai_send')}
                 </button>
               </div>
             </div>

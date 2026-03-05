@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { useI18n } from '../contexts/I18nContext';
 import {
   Upload,
   FileText,
@@ -39,6 +40,7 @@ import {
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+  const { language, setLanguage, t } = useI18n();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeSection, setActiveSection] = useState('home');
@@ -1478,30 +1480,30 @@ const Dashboard = () => {
   const stats = [
     { 
       icon: FileText, 
-      label: 'Total PDFs', 
+      label: t('home_stat_total_pdfs_label'), 
       value: userPDFs.length.toString(), 
-      change: `${completedPDFsCount} completed`,
+      change: t('home_stat_total_pdfs_change', { count: completedPDFsCount }),
       color: 'from-blue-500 to-blue-600'
     },
     { 
       icon: Brain, 
-      label: 'Quizzes', 
+      label: t('home_stat_quizzes_label'), 
       value: quizzes.length.toString(), 
-      change: `${quizzes.length} created`,
+      change: t('home_stat_quizzes_change', { count: quizzes.length }),
       color: 'from-purple-500 to-purple-600'
     },
     { 
       icon: Users, 
-      label: 'Shared', 
+      label: t('home_stat_shared_label'), 
       value: sharedPDFsCount.toString(), 
-      change: `${sharedPDFsCount} public`,
+      change: t('home_stat_shared_change', { count: sharedPDFsCount }),
       color: 'from-green-500 to-green-600'
     },
     { 
       icon: TrendingUp, 
-      label: 'Learning Points', 
+      label: t('home_stat_points_label'), 
       value: learningPoints.toString(), 
-      change: 'Keep learning!',
+      change: t('home_stat_points_change'),
       color: 'from-orange-500 to-orange-600'
     },
   ];
@@ -1539,14 +1541,14 @@ const Dashboard = () => {
   // Public PDFs are now loaded from state via loadPublicPDFs()
 
   const navItems = [
-    { id: 'home', icon: Home, label: 'Home' },
-    { id: 'pdfs', icon: FileText, label: 'My PDFs' },
-    { id: 'courses', icon: BookOpen, label: 'My Courses' },
-    { id: 'quizzes', icon: Brain, label: 'My Quizzes' },
-    { id: 'flashcards', icon: Layers, label: 'Flashcards' },
-    { id: 'shared', icon: Share2, label: 'Shared Content' },
-    { id: 'community', icon: MessageCircle, label: 'Community' },
-    { id: 'settings', icon: Settings, label: 'Settings' },
+    { id: 'home', icon: Home, label: t('nav_home') },
+    { id: 'pdfs', icon: FileText, label: t('nav_my_pdfs') },
+    { id: 'courses', icon: BookOpen, label: t('nav_my_courses') },
+    { id: 'quizzes', icon: Brain, label: t('nav_my_quizzes') },
+    { id: 'flashcards', icon: Layers, label: t('nav_flashcards') },
+    { id: 'shared', icon: Share2, label: t('nav_shared_content') },
+    { id: 'community', icon: MessageCircle, label: t('nav_community') },
+    { id: 'settings', icon: Settings, label: t('nav_settings') },
   ];
 
   const handleDrag = (e) => {
@@ -1773,11 +1775,11 @@ const Dashboard = () => {
               className={`w-full flex items-center ${
                 sidebarCollapsed ? 'justify-center' : 'space-x-3'
               } px-4 py-3 text-gray-600 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded-lg transition-colors`}
-              title={sidebarCollapsed ? 'Logout' : ''}
+              title={sidebarCollapsed ? t('nav_logout') : ''}
             >
               <LogOut className="w-5 h-5 flex-shrink-0" />
               {!sidebarCollapsed && (
-                <span className="font-medium">Logout</span>
+                <span className="font-medium">{t('nav_logout')}</span>
               )}
             </button>
           </div>
@@ -1802,13 +1804,39 @@ const Dashboard = () => {
                 <Search className="w-5 h-5 text-gray-500 dark:text-gray-400" />
                 <input
                   type="text"
-                  placeholder="PDF veya quiz ara..."
+                  placeholder={t('search_placeholder')}
                   className="bg-transparent border-none outline-none text-gray-900 dark:text-white placeholder-gray-500 w-full"
                 />
               </div>
             </div>
 
             <div className="flex items-center space-x-4">
+              {/* Language toggle */}
+              <div className="flex items-center rounded-lg border border-gray-200 dark:border-zinc-700 overflow-hidden text-xs">
+                <button
+                  type="button"
+                  onClick={() => setLanguage('en')}
+                  className={`px-2.5 py-1.5 font-medium ${
+                    language === 'en'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-zinc-800'
+                  }`}
+                >
+                  EN
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLanguage('tr')}
+                  className={`px-2.5 py-1.5 font-medium border-l border-gray-200 dark:border-zinc-700 ${
+                    language === 'tr'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-zinc-800'
+                  }`}
+                >
+                  TR
+                </button>
+              </div>
+
               {/* Theme toggle */}
               <button
                 type="button"
@@ -1852,10 +1880,10 @@ const Dashboard = () => {
               {/* Welcome Section */}
               <div>
                 <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-                  Welcome, {user?.user_metadata?.first_name || 'User'}! 👋
+                  {t('home_welcome', { name: user?.user_metadata?.first_name || 'User' })}
                 </h1>
                 <p className="text-gray-600 dark:text-gray-400">
-                  Which PDF do you want to learn today?
+                  {t('home_subtitle')}
                 </p>
               </div>
 
@@ -1900,13 +1928,13 @@ const Dashboard = () => {
                   </div>
                   <div>
                     <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
-                      Upload PDF
+                      {t('home_upload_title')}
                     </h3>
                     <p className="text-gray-600 dark:text-gray-400 mb-4">
-                      Drag & drop or click
+                      {t('home_upload_subtitle')}
                     </p>
                     <label className="px-6 py-3 bg-gray-100 dark:bg-white text-gray-900 dark:text-black rounded-lg font-semibold border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors cursor-pointer inline-block">
-                      Choose File
+                      {t('home_upload_button')}
                       <input
                         type="file"
                         accept=".pdf"
@@ -1924,7 +1952,9 @@ const Dashboard = () => {
               {/* Recent PDFs */}
               <div>
                 <div className="mb-4">
-                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Recent Uploads</h2>
+                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                    {t('home_recent_uploads')}
+                  </h2>
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                   {userPDFs.length > 0 ? userPDFs.slice(0, 3).map((pdf) => (
@@ -1952,35 +1982,47 @@ const Dashboard = () => {
                       {/* Course Info */}
                       <div className="space-y-2 mb-4">
                         <div className="flex items-center justify-between text-xs">
-                          <span className="text-gray-500 dark:text-gray-400">University:</span>
-                          <span className="text-gray-900 dark:text-white font-medium">{pdf.university}</span>
+                          <span className="text-gray-500 dark:text-gray-400">
+                            {t('pdf_card_university')}
+                          </span>
+                          <span className="text-gray-900 dark:text-white font-medium">
+                            {pdf.university}
+                          </span>
                         </div>
                         <div className="flex items-center justify-between text-xs">
-                          <span className="text-gray-500 dark:text-gray-400">Grade:</span>
-                          <span className="text-gray-900 dark:text-white font-medium">{pdf.grade}</span>
+                          <span className="text-gray-500 dark:text-gray-400">
+                            {t('pdf_card_grade')}
+                          </span>
+                          <span className="text-gray-900 dark:text-white font-medium">
+                            {pdf.grade}
+                          </span>
                         </div>
                         <div className="flex items-center justify-between text-xs">
-                          <span className="text-gray-500 dark:text-gray-400">Status:</span>
+                          <span className="text-gray-500 dark:text-gray-400">
+                            {t('pdf_card_status')}
+                          </span>
                           <button
                             onClick={() => handleStatusToggle(pdf.id, pdf.status)}
                             className={`font-medium px-3 py-1 rounded-full transition-all hover:opacity-80 ${
-                              pdf.status === 'completed' 
-                                ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' 
+                              pdf.status === 'completed'
+                                ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
                                 : 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'
                             }`}
                           >
-                            {pdf.status === 'processing' ? 'In Progress' : 'Completed'}
+                            {pdf.status === 'processing'
+                              ? t('pdf_card_status_in_progress')
+                              : t('pdf_card_status_completed')}
                           </button>
                         </div>
                       </div>
 
                       {/* Actions */}
                       <div className="flex items-center space-x-2">
-                        <button 
+                        <button
                           onClick={() => navigate(`/pdf/${pdf.id}`)}
                           className="flex-1 px-3 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-sm font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
                         >
-                          Open
+                          {t('pdf_card_open')}
                         </button>
                         <button 
                           onClick={() => handleDownload(pdf)}
@@ -2007,8 +2049,12 @@ const Dashboard = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between mb-8">
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">My PDFs</h1>
-                  <p className="text-gray-600 dark:text-gray-400">All your uploaded PDF documents</p>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                    {t('section_my_pdfs_title')}
+                  </h1>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    {t('section_my_pdfs_subtitle')}
+                  </p>
                 </div>
                 <button 
                   onClick={() => setUploadModalOpen(true)}
@@ -2088,34 +2134,60 @@ const Dashboard = () => {
                     {/* PDF Details */}
                     <div className="space-y-2 mb-4">
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-500 dark:text-gray-400">Course:</span>
-                        <span className="text-gray-900 dark:text-white font-medium">{pdf.course_name}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-500 dark:text-gray-400">University:</span>
-                        <span className="text-gray-900 dark:text-white font-medium">{pdf.university}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-500 dark:text-gray-400">Grade:</span>
-                        <span className="text-gray-900 dark:text-white font-medium">{pdf.grade}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-500 dark:text-gray-400">Privacy:</span>
-                        <span className={`font-medium ${pdf.privacy === 'public' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'}`}>
-                          {pdf.privacy === 'public' ? 'Public' : 'Private'}
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {t('pdf_card_course')}
+                        </span>
+                        <span className="text-gray-900 dark:text-white font-medium">
+                          {pdf.course_name}
                         </span>
                       </div>
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-500 dark:text-gray-400">Status:</span>
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {t('pdf_card_university')}
+                        </span>
+                        <span className="text-gray-900 dark:text-white font-medium">
+                          {pdf.university}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {t('pdf_card_grade')}
+                        </span>
+                        <span className="text-gray-900 dark:text-white font-medium">
+                          {pdf.grade}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {t('pdf_card_privacy')}
+                        </span>
+                        <span
+                          className={`font-medium ${
+                            pdf.privacy === 'public'
+                              ? 'text-blue-600 dark:text-blue-400'
+                              : 'text-gray-600 dark:text-gray-400'
+                          }`}
+                        >
+                          {pdf.privacy === 'public'
+                            ? t('pdf_card_privacy_public')
+                            : t('pdf_card_privacy_private')}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {t('pdf_card_status')}
+                        </span>
                         <button
                           onClick={() => handleStatusToggle(pdf.id, pdf.status)}
                           className={`font-medium px-3 py-1 rounded-full transition-all hover:opacity-80 text-xs ${
-                            pdf.status === 'completed' 
-                              ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' 
+                            pdf.status === 'completed'
+                              ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
                               : 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'
                           }`}
                         >
-                          {pdf.status === 'processing' ? 'In Progress' : 'Completed'}
+                          {pdf.status === 'processing'
+                            ? t('pdf_card_status_in_progress')
+                            : t('pdf_card_status_completed')}
                         </button>
                       </div>
                     </div>
@@ -2126,7 +2198,7 @@ const Dashboard = () => {
                           onClick={() => navigate(`/pdf/${pdf.id}`)}
                           className="flex-1 min-w-0 px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-sm font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
                         >
-                          Open
+                          {t('pdf_card_open')}
                         </button>
                         {pdf.status === 'completed' && (
                           <button
@@ -2140,7 +2212,7 @@ const Dashboard = () => {
                             title="Create flashcard deck from this PDF"
                           >
                             <Layers className="w-4 h-4" />
-                            Cards
+                            {t('pdf_card_cards')}
                           </button>
                         )}
                         <button 
@@ -2181,15 +2253,19 @@ const Dashboard = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">My Courses</h1>
-                  <p className="text-gray-600 dark:text-gray-400">All your PDFs and courses</p>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                    {t('section_my_courses_title')}
+                  </h1>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    {t('section_my_courses_subtitle')}
+                  </p>
                 </div>
                 <button 
                   onClick={() => setNewCourseModalOpen(true)}
                   className="px-6 py-3 bg-gray-100 dark:bg-white text-gray-900 dark:text-black rounded-lg font-semibold hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors flex items-center space-x-2 border-2 border-gray-300 dark:border-transparent"
                 >
                   <Plus className="w-5 h-5" />
-                  <span>New Course</span>
+                  <span>{t('courses_new_button')}</span>
                 </button>
               </div>
 
@@ -2230,7 +2306,9 @@ const Dashboard = () => {
                     {/* Progress */}
                     <div className="space-y-2 mb-4">
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-500 dark:text-gray-400">Progress</span>
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {t('courses_progress_label')}
+                        </span>
                         <span className="text-gray-900 dark:text-white font-medium">{course.progress}%</span>
                       </div>
                       <div className="w-full bg-gray-200 dark:bg-zinc-800 rounded-full h-2">
@@ -2250,21 +2328,25 @@ const Dashboard = () => {
                         onClick={() => setSelectedCourse(course)}
                         className="px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-sm font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
                       >
-                        Continue
+                        {t('courses_continue_button')}
                       </button>
                     </div>
                   </motion.div>
                 )) : (
                   <div className="col-span-2 text-center py-16">
                     <BookOpen className="w-20 h-20 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-600 dark:text-gray-400 text-xl mb-2">No courses yet</p>
-                    <p className="text-gray-500 text-sm mb-6">Create your first course by grouping PDFs together!</p>
+                    <p className="text-gray-600 dark:text-gray-400 text-xl mb-2">
+                      {t('courses_empty_title')}
+                    </p>
+                    <p className="text-gray-500 text-sm mb-6">
+                      {t('courses_empty_subtitle')}
+                    </p>
                     <button 
                       onClick={() => setNewCourseModalOpen(true)}
                       className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-lg font-semibold hover:opacity-90 transition-opacity inline-flex items-center space-x-2"
                     >
                       <Plus className="w-5 h-5" />
-                      <span>Create Course</span>
+                      <span>{t('courses_empty_create_button')}</span>
                     </button>
                   </div>
                 )}
@@ -2276,15 +2358,19 @@ const Dashboard = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">My Quizzes</h1>
-                  <p className="text-gray-600 dark:text-gray-400">Test your knowledge on uploaded PDFs</p>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                    {t('section_my_quizzes_title')}
+                  </h1>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    {t('section_my_quizzes_subtitle')}
+                  </p>
                 </div>
                 <button 
                   onClick={() => setNewQuizModalOpen(true)}
                   className="px-6 py-3 bg-gray-100 dark:bg-white text-gray-900 dark:text-black rounded-lg font-semibold hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors flex items-center space-x-2 border-2 border-gray-300 dark:border-transparent"
                 >
                   <Plus className="w-5 h-5" />
-                  <span>New Quiz</span>
+                  <span>{t('quiz_new_button')}</span>
                 </button>
               </div>
 
@@ -2333,12 +2419,17 @@ const Dashboard = () => {
                             </span>
                           </h3>
                           <div className="flex items-center space-x-4 text-sm text-gray-600 dark:text-gray-400">
-                            <span>{quiz.total_questions} questions</span>
+                            <span>
+                              {t('quiz_questions_label', { count: quiz.total_questions })}
+                            </span>
                             {lastScoreByQuizId[quiz.id] && (
                               <>
                                 <span>•</span>
                                 <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 text-xs font-medium border border-emerald-500/30">
-                                  Score {lastScoreByQuizId[quiz.id].score}/{lastScoreByQuizId[quiz.id].total_points}
+                                  {t('quiz_score_label', {
+                                    score: lastScoreByQuizId[quiz.id].score,
+                                    total: lastScoreByQuizId[quiz.id].total_points,
+                                  })}
                                 </span>
                               </>
                             )}
@@ -2354,7 +2445,7 @@ const Dashboard = () => {
                               <>
                                 <span>•</span>
                                 <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded text-xs">
-                                  Time limit: {quiz.time_limit} min
+                                  {t('quiz_time_limit_badge', { minutes: quiz.time_limit })}
                                 </span>
                               </>
                             )}
@@ -2375,7 +2466,7 @@ const Dashboard = () => {
                           }}
                           className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
                         >
-                          Start Quiz
+                        {t('quiz_start_button')}
                         </button>
                         <button
                           onClick={(e) => {
@@ -2386,7 +2477,7 @@ const Dashboard = () => {
                           title="Study as flashcards"
                         >
                           <Layers className="w-4 h-4" />
-                          Study cards
+                          {t('quiz_study_cards_button')}
                         </button>
                         <button
                           onClick={(e) => {
@@ -2423,8 +2514,12 @@ const Dashboard = () => {
             <div className="space-y-8">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Flashcards</h1>
-                  <p className="text-gray-600 dark:text-gray-400">Study from quiz decks or create decks from any PDF.</p>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                    {t('flashcards_title')}
+                  </h1>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    {t('flashcards_subtitle')}
+                  </p>
                 </div>
                 <button
                   onClick={() => {
@@ -2436,14 +2531,16 @@ const Dashboard = () => {
                   className="px-6 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-lg font-semibold hover:opacity-90 transition-opacity flex items-center gap-2"
                 >
                   <Layers className="w-5 h-5" />
-                  Create deck from PDF
+                  {t('flashcards_create_from_pdf_button')}
                 </button>
               </div>
 
               {/* From PDFs */}
               {(pdfDecks.length > 0) && (
                 <div>
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">From PDFs</h2>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+                    {t('flashcards_from_pdfs_title')}
+                  </h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {pdfDecks.map((deck) => (
                       <motion.div
@@ -2465,13 +2562,17 @@ const Dashboard = () => {
                             <FileText className="w-6 h-6 text-white" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">{deck.title}</h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">PDF deck</p>
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+                              {deck.title}
+                            </h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                              {t('flashcards_pdf_deck_badge')}
+                            </p>
                             <button
                               onClick={() => navigate(`/flashcards/deck/${deck.id}`)}
                               className="mt-4 px-4 py-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
                             >
-                              Study deck
+                              {t('flashcards_study_deck_button')}
                             </button>
                           </div>
                         </div>
@@ -2483,29 +2584,47 @@ const Dashboard = () => {
 
               {/* From Quizzes */}
               <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">From Quizzes</h2>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+                  {t('flashcards_from_quizzes_title')}
+                </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {quizzes.length > 0 ? (
                     quizzes.map((quiz) => (
                       <motion.div
                         key={quiz.id}
                         whileHover={{ scale: 1.02 }}
-                        className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-purple-400 dark:hover:border-purple-500 transition-all"
+                        className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-purple-400 dark:hover:border-purple-500 transition-all relative group"
                       >
+                        {/* Delete quiz deck button (removes quiz + its cards) */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteQuiz(quiz);
+                          }}
+                          className="absolute top-3 right-3 p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                          title="Delete this deck"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+
                         <div className="flex items-start gap-4">
                           <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
                             <Layers className="w-6 h-6 text-white" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">{quiz.title}</h3>
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+                              {quiz.title}
+                            </h3>
                             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                              {quiz.total_questions} cards
+                              {t('flashcards_quiz_cards_label', {
+                                count: quiz.total_questions,
+                              })}
                             </p>
                             <button
                               onClick={() => navigate(`/flashcards/quiz/${quiz.id}`)}
                               className="mt-4 px-4 py-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
                             >
-                              Study deck
+                              {t('flashcards_study_deck_button')}
                             </button>
                           </div>
                         </div>
@@ -2514,13 +2633,17 @@ const Dashboard = () => {
                   ) : (
                     <div className="col-span-full text-center py-12 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl">
                       <Brain className="w-16 h-16 text-gray-400 mx-auto mb-3" />
-                      <p className="text-gray-600 dark:text-gray-400 mb-2">No quiz decks yet</p>
-                      <p className="text-gray-500 text-sm mb-4">Create a quiz from My Quizzes to study as cards.</p>
+                      <p className="text-gray-600 dark:text-gray-400 mb-2">
+                        {t('flashcards_no_quiz_decks_title')}
+                      </p>
+                      <p className="text-gray-500 text-sm mb-4">
+                        {t('flashcards_no_quiz_decks_subtitle')}
+                      </p>
                       <button
                         onClick={() => setActiveSection('quizzes')}
                         className="px-4 py-2 text-purple-500 dark:text-purple-400 font-medium hover:underline"
                       >
-                        Go to My Quizzes
+                        {t('flashcards_go_to_my_quizzes_button')}
                       </button>
                     </div>
                   )}
@@ -2533,8 +2656,12 @@ const Dashboard = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Shared Content</h1>
-                  <p className="text-gray-600 dark:text-gray-400">Explore public PDFs and quizzes from all users</p>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                    {t('section_shared_title')}
+                  </h1>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    {t('section_shared_subtitle')}
+                  </p>
                 </div>
                 <div className="flex items-center space-x-3">
                   <div className="hidden md:flex bg-gray-200 dark:bg-zinc-900 border border-gray-300 dark:border-zinc-800 rounded-full p-1">
@@ -2548,7 +2675,7 @@ const Dashboard = () => {
                             : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
                         }`}
                       >
-                        {type === 'pdfs' ? 'PDFs' : 'Quizzes'}
+                        {type === 'pdfs' ? t('shared_tab_pdfs') : t('shared_tab_quizzes')}
                       </button>
                     ))}
                   </div>
@@ -2567,7 +2694,7 @@ const Dashboard = () => {
                         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                         </svg>
-                        <span>Refresh</span>
+                        <span>{t('shared_refresh')}</span>
                       </>
                     )}
                   </button>
@@ -2576,14 +2703,18 @@ const Dashboard = () => {
 
               {/* Filters */}
               <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">Filters</h3>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                  {t('shared_filters_title')}
+                </h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {/* Course Name Filter */}
                   <div>
-                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-2">Course Name</label>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-2">
+                      {t('shared_filters_course_label')}
+                    </label>
                     <input
                       type="text"
-                      placeholder="e.g., ISG, Math..."
+                      placeholder={t('shared_filters_course_placeholder')}
                       value={sharedFilters.courseName}
                       onChange={(e) => setSharedFilters({ ...sharedFilters, courseName: e.target.value })}
                       className="w-full px-3 py-2 bg-gray-100 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
@@ -2592,10 +2723,12 @@ const Dashboard = () => {
 
                   {/* University Filter */}
                   <div>
-                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-2">University</label>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-2">
+                      {t('shared_filters_university_label')}
+                    </label>
                     <input
                       type="text"
-                      placeholder="e.g., Ege, Boğaziçi..."
+                      placeholder={t('shared_filters_university_placeholder')}
                       value={sharedFilters.university}
                       onChange={(e) => setSharedFilters({ ...sharedFilters, university: e.target.value })}
                       className="w-full px-3 py-2 bg-gray-100 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
@@ -2604,7 +2737,9 @@ const Dashboard = () => {
 
                   {/* Grade Filter */}
                   <div className="md:col-span-3">
-                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-3">Grade (Select multiple)</label>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-3">
+                      {t('shared_filters_grade_label')}
+                    </label>
                     <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
                       {['1', '2', '3', '4', "Master's", 'Doctorate'].map((grade) => (
                         <button
@@ -2623,10 +2758,12 @@ const Dashboard = () => {
                   </div>
                 </div>
 
-                {/* Sort + Clear */}
+              {/* Sort + Clear */}
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-600 dark:text-gray-400">Sort by:</span>
+                  <span className="text-xs text-gray-600 dark:text-gray-400">
+                    {t('shared_filters_sort_label')}
+                  </span>
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
@@ -2637,7 +2774,7 @@ const Dashboard = () => {
                             : 'bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-zinc-700 hover:border-blue-500 hover:text-gray-900 dark:hover:text-white'
                         }`}
                       >
-                        Default
+                        {t('shared_filters_sort_default')}
                       </button>
                       <button
                         type="button"
@@ -2648,7 +2785,7 @@ const Dashboard = () => {
                             : 'bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-zinc-700 hover:border-blue-500 hover:text-gray-900 dark:hover:text-white'
                         }`}
                       >
-                        Most votes
+                        {t('shared_filters_sort_most_votes')}
                       </button>
                       <button
                         type="button"
@@ -2659,7 +2796,7 @@ const Dashboard = () => {
                             : 'bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-zinc-700 hover:border-blue-500 hover:text-gray-900 dark:hover:text-white'
                         }`}
                       >
-                        Highest rating
+                        {t('shared_filters_sort_highest_rating')}
                       </button>
                     </div>
                   </div>
@@ -2669,7 +2806,7 @@ const Dashboard = () => {
                       onClick={() => setSharedFilters({ courseName: '', university: '', grades: [] })}
                       className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
                     >
-                      Clear all filters
+                      {t('shared_filters_clear_all')}
                     </button>
                   )}
                 </div>
@@ -2749,11 +2886,14 @@ const Dashboard = () => {
                                   </span>
                                   <span className="h-3 w-px bg-gray-300 dark:bg-zinc-700" />
                                   <span>
-                                    {ratingStats.count} vote{ratingStats.count === 1 ? '' : 's'}
+                                    {t('shared_votes_label', {
+                                      count: ratingStats.count,
+                                      suffix: ratingStats.count === 1 ? '' : 's',
+                                    })}
                                   </span>
                                 </>
                               ) : (
-                                <span>No votes yet</span>
+                                <span>{t('shared_no_votes_yet')}</span>
                               )}
                             </div>
                           </div>
@@ -2767,7 +2907,7 @@ const Dashboard = () => {
                             onClick={() => navigate(`/pdf/${pdf.id}`)}
                             className="px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-sm font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
                           >
-                            View
+                            {t('shared_view_button')}
                           </button>
                         </div>
                       </div>
@@ -2777,10 +2917,14 @@ const Dashboard = () => {
                   <div className="col-span-2 text-center py-16">
                     <Users className="w-20 h-20 text-gray-600 mx-auto mb-4" />
                     <p className="text-gray-400 text-xl mb-2">
-                      {publicPDFs.length > 0 ? 'No PDFs match your filters' : 'No public PDFs yet'}
+                      {publicPDFs.length > 0
+                        ? t('shared_filters_no_pdfs_match')
+                        : t('shared_filters_no_public_pdfs')}
                     </p>
                     <p className="text-gray-500 text-sm">
-                      {publicPDFs.length > 0 ? 'Try adjusting your filters' : 'When users share PDFs publicly, they will appear here!'}
+                      {publicPDFs.length > 0
+                        ? t('shared_filters_try_adjusting')
+                        : t('shared_filters_when_users_share')}
                     </p>
                   </div>
                 ))}
@@ -2829,6 +2973,11 @@ const Dashboard = () => {
                                   >
                                     {quiz.difficulty}
                                   </span>
+                                  {quiz.time_limit != null && (
+                                    <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
+                                      {t('quiz_time_limit_badge', { minutes: quiz.time_limit })}
+                                    </span>
+                                  )}
                                   {quiz.time_limit != null && (
                                     <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
                                       Time limit: {quiz.time_limit} min
@@ -2935,15 +3084,19 @@ const Dashboard = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Community</h1>
-                  <p className="text-gray-500 dark:text-gray-400">Share photos, ask questions, answer with comments to others</p>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                    {t('section_community_title')}
+                  </h1>
+                  <p className="text-gray-500 dark:text-gray-400">
+                    {t('section_community_subtitle')}
+                  </p>
                 </div>
                 <button
                   onClick={() => setCommunityPostModalOpen(true)}
                   className="flex items-center space-x-2 px-4 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-lg font-semibold hover:opacity-90 transition-opacity"
                 >
                   <ImagePlus className="w-5 h-5" />
-                  <span>Add Post</span>
+                  <span>{t('community_add_post')}</span>
                 </button>
               </div>
 
@@ -2957,7 +3110,7 @@ const Dashboard = () => {
                     onChange={(e) => {
                       setCommunityFilterCourse(e.target.value);
                     }}
-                    placeholder="Filter by course name..."
+                    placeholder={t('community_filter_placeholder')}
                     className="flex-1 px-4 py-2 bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   {communityFilterCourse && (
@@ -2966,9 +3119,9 @@ const Dashboard = () => {
                         setCommunityFilterCourse('');
                         loadCommunityPosts();
                       }}
-                      className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                        className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
                     >
-                      Clear
+                      {t('community_clear_filter')}
                     </button>
                   )}
                 </div>
@@ -3037,8 +3190,12 @@ const Dashboard = () => {
           {activeSection === 'settings' && (
             <div className="space-y-6">
               <div>
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Settings</h1>
-                <p className="text-gray-500 dark:text-gray-400">Account and app settings</p>
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                  {t('section_settings_title')}
+                </h1>
+                <p className="text-gray-500 dark:text-gray-400">
+                  {t('section_settings_subtitle')}
+                </p>
               </div>
 
               {/* Profile Settings */}
@@ -3473,7 +3630,9 @@ const Dashboard = () => {
             className="bg-zinc-900 border-2 border-zinc-800 rounded-2xl p-8 max-w-3xl w-full my-8"
           >
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-white">Create New Course</h2>
+              <h2 className="text-2xl font-bold text-white">
+                {t('courses_modal_title')}
+              </h2>
               <button
                 onClick={() => {
                   setNewCourseModalOpen(false);
@@ -3489,11 +3648,11 @@ const Dashboard = () => {
               {/* Course Title */}
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Course Title *
+                  {t('courses_modal_title_label')}
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g., Mathematics PDFs, Physics Notes..."
+                  placeholder={t('courses_modal_title_placeholder')}
                   value={newCourseData.title}
                   onChange={(e) => setNewCourseData({ ...newCourseData, title: e.target.value })}
                   className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
@@ -3711,7 +3870,9 @@ const Dashboard = () => {
             className="bg-zinc-900 border-2 border-zinc-800 rounded-2xl p-8 max-w-2xl w-full my-8"
           >
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-white">Create New Quiz</h2>
+              <h2 className="text-2xl font-bold text-white">
+                {t('quiz_modal_title')}
+              </h2>
               <button
                 onClick={() => {
                   setNewQuizModalOpen(false);
@@ -3838,7 +3999,7 @@ const Dashboard = () => {
               {/* Time Limit */}
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-3">
-                  Time Limit (minutes)
+                  {t('quiz_time_limit_label')}
                 </label>
                 <div className="grid grid-cols-4 gap-3">
                   {[5, 10, 15, 20].map((mins) => (
@@ -3856,14 +4017,14 @@ const Dashboard = () => {
                           : 'bg-zinc-800 text-gray-400 hover:bg-zinc-700'
                       }`}
                     >
-                      {mins} dk
+                      {t('quiz_time_limit_minutes_short', { minutes: mins })}
                     </button>
                   ))}
                 </div>
                 <p className="mt-2 text-xs text-gray-500">
                   {newQuizData.timeLimitMinutes
-                    ? `${newQuizData.timeLimitMinutes} minutes selected. The quiz will be submitted automatically when time is up.`
-                    : 'If you do not select a time limit, the quiz will have no time limit.'}
+                    ? t('quiz_time_limit_selected', { minutes: newQuizData.timeLimitMinutes })
+                    : t('quiz_time_limit_none')}
                 </p>
               </div>
 

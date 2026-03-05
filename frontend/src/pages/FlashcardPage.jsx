@@ -111,22 +111,31 @@ const FlashcardPage = ({ mode = 'quiz' }) => {
   };
 
   const handleDeleteCard = () => {
-    if (mode !== 'deck') return; // Only allow deletion for PDF decks
+    if (!currentCard) return;
     setCardToDelete(currentCard);
     setDeleteCardModalOpen(true);
   };
 
   const confirmDeleteCard = async () => {
-    if (!cardToDelete || mode !== 'deck') return;
-    
+    if (!cardToDelete) return;
+
     setDeletingCard(true);
     try {
-      const { error } = await supabase
-        .from('flashcards')
-        .delete()
-        .eq('id', cardToDelete.id);
+      if (mode === 'deck') {
+        const { error } = await supabase
+          .from('flashcards')
+          .delete()
+          .eq('id', cardToDelete.id);
 
-      if (error) throw error;
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('quiz_questions')
+          .delete()
+          .eq('id', cardToDelete.id);
+
+        if (error) throw error;
+      }
 
       // Remove from local state
       const newCards = cards.filter((c) => c.id !== cardToDelete.id);
@@ -195,15 +204,13 @@ const FlashcardPage = ({ mode = 'quiz' }) => {
               <span>Back to Dashboard</span>
             </button>
             <div className="flex items-center gap-2">
-              {mode === 'deck' && (
-                <button
-                  onClick={handleDeleteCard}
-                  className="p-2 rounded-lg text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-300 transition-colors"
-                  title="Delete current card"
-                >
-                  <Trash2 className="w-5 h-5" />
-                </button>
-              )}
+              <button
+                onClick={handleDeleteCard}
+                className="p-2 rounded-lg text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-300 transition-colors"
+                title="Delete current card"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
               <button
                 onClick={shuffleDeck}
                 className="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-zinc-800 hover:text-gray-900 dark:hover:text-white transition-colors"

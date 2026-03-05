@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useI18n } from '../contexts/I18nContext';
 import {
   ChevronLeft,
   ChevronRight,
@@ -18,6 +19,7 @@ const QuizPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { t } = useI18n();
   
   const [quiz, setQuiz] = useState(null);
   const [questions, setQuestions] = useState([]);
@@ -195,7 +197,7 @@ const QuizPage = () => {
                 <Clock className="w-5 h-5" />
                 <span>
                   {timeLimitSeconds != null
-                    ? `${formatTime(Math.max(0, timeLimitSeconds - timeElapsed))} kaldı`
+                    ? `${formatTime(Math.max(0, timeLimitSeconds - timeElapsed))} ${t('quiz_timer_remaining_suffix')}`
                     : formatTime(timeElapsed)}
                 </span>
               </div>
