@@ -124,6 +124,15 @@ const MESSAGES = {
     home_upload_button: 'Choose File',
     home_recent_uploads: 'Recent Uploads',
 
+    // Analytics – quiz performance
+    analytics_title: 'Learning analytics',
+    analytics_subtitle: 'See how your quiz performance changes over time.',
+    analytics_best_score_label: 'Best score',
+    analytics_attempts_label: '{count} attempts',
+    analytics_last_attempt_label: 'Last attempt',
+    analytics_no_attempts_title: 'No quiz data yet',
+    analytics_no_attempts_subtitle: 'Take a quiz to see detailed statistics and charts here.',
+
     // Courses – section & modal
     courses_new_button: 'New Course',
     courses_progress_label: 'Progress',
@@ -270,6 +279,17 @@ const MESSAGES = {
     home_upload_subtitle: 'Sürükleyip bırak veya tıkla',
     home_upload_button: 'Dosya Seç',
     home_recent_uploads: 'Son Yüklenenler',
+
+    // Analytics – quiz performance
+    analytics_title: 'Gelişmiş analiz ve ilerleme',
+    analytics_subtitle:
+      'Quiz denemelerin, başarı oranların ve en iyi skorun bu panelde gösterilir.',
+    analytics_best_score_label: 'En iyi skor',
+    analytics_attempts_label: '{count} deneme',
+    analytics_last_attempt_label: 'Son deneme',
+    analytics_no_attempts_title: 'Henüz analiz için veri yok',
+    analytics_no_attempts_subtitle:
+      'Önce birkaç quiz çöz, ardından burada detaylı istatistikleri ve grafiklerini gör.',
 
     // Courses – section & modal
     courses_new_button: 'Yeni Kurs',

@@ -132,6 +132,7 @@ const Dashboard = () => {
   });
   const [creatingQuiz, setCreatingQuiz] = useState(false);
   const [lastScoreByQuizId, setLastScoreByQuizId] = useState({}); // { [quizId]: { score, total_points } }
+  const [quizAttempts, setQuizAttempts] = useState([]); // full attempt history for analytics
 
   // PDF flashcard decks (source_type = 'pdf')
   const [pdfDecks, setPdfDecks] = useState([]);
@@ -626,6 +627,23 @@ const Dashboard = () => {
     }
   };
 
+  // Load full quiz attempts history for analytics
+  const loadQuizAnalytics = async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('quiz_attempts')
+        .select('id, quiz_id, score, total_points, percentage, created_at, quiz:quizzes(title)')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      setQuizAttempts(data || []);
+    } catch (error) {
+      console.error('Error loading quiz analytics:', error);
+    }
+  };
+
   // Load PDF-based flashcard decks
   const loadPdfDecks = async () => {
     if (!user) return;
@@ -1086,7 +1104,7 @@ const Dashboard = () => {
     }
   };
 
-  // Load PDFs, Courses, Quizzes, last scores and Public content when user changes
+  // Load PDFs, Courses, Quizzes, last scores, analytics and Public content when user changes
   useEffect(() => {
     if (user) {
       loadUserPDFs();
@@ -1096,6 +1114,7 @@ const Dashboard = () => {
       loadUserQuizzes();
       loadLastScores();
       loadCommunityPosts();
+      loadQuizAnalytics();
     }
   }, [user]);
 
@@ -2042,6 +2061,7 @@ const Dashboard = () => {
                   )}
                 </div>
               </div>
+
             </div>
           )}
 
@@ -2395,7 +2415,15 @@ const Dashboard = () => {
                 )}
 
                 {/* Quiz List */}
-                {quizzes.length > 0 ? quizzes.map((quiz) => (
+                {quizzes.length > 0 ? quizzes.map((quiz) => {
+                  const attemptsForQuiz = quizAttempts
+                    .filter((a) => a.quiz_id === quiz.id)
+                    .sort(
+                      (a, b) =>
+                        new Date(a.created_at) - new Date(b.created_at),
+                    );
+
+                  return (
                   <motion.div
                     key={quiz.id}
                     whileHover={{ x: 4 }}
@@ -2491,8 +2519,54 @@ const Dashboard = () => {
                         </button>
                       </div>
                     </div>
+
+                    {/* Attempt history */}
+                    {attemptsForQuiz.length > 0 && (
+                      <div className="mt-4 pt-4 border-t border-gray-200 dark:border-zinc-800">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                            {t('analytics_attempts_label', {
+                              count: attemptsForQuiz.length,
+                            })}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {attemptsForQuiz
+                            .slice(-3)
+                            .reverse()
+                            .map((attempt, idx) => {
+                              const displayIndex =
+                                attemptsForQuiz.length - idx;
+                              const pct =
+                                Number(attempt.percentage) ||
+                                (attempt.total_points
+                                  ? Math.round(
+                                      (attempt.score /
+                                        attempt.total_points) *
+                                        100,
+                                    )
+                                  : 0);
+                              return (
+                                <div
+                                  key={attempt.id}
+                                  className="px-2.5 py-1 rounded-full bg-purple-500/10 text-[11px] text-purple-500 dark:text-purple-300 border border-purple-500/30"
+                                >
+                                  <span className="font-medium">
+                                    {displayIndex}. deneme
+                                  </span>
+                                  <span className="opacity-75">
+                                    {' '}
+                                    • {pct}% ({attempt.score}/
+                                    {attempt.total_points})
+                                  </span>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    )}
                   </motion.div>
-                )) : !creatingQuiz && (
+                )}) : !creatingQuiz && (
                   <div className="text-center py-16">
                     <Brain className="w-20 h-20 text-gray-400 mx-auto mb-4" />
                     <p className="text-gray-600 dark:text-gray-400 text-xl mb-2">No quizzes yet</p>
