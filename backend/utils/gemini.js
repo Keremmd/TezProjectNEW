@@ -40,12 +40,23 @@ export async function generateQuizFromPDF(pdfText, options = {}) {
 
   const model = getGeminiModel();
 
-  const prompt = `You are an expert, strict exam writer. Create ${questionCount} HARD, detailed multiple-choice questions in ${language} based ONLY on the PDF below. Take your time: each question must require real understanding, not memorization.
+  const prompt = `You are an expert, strict exam writer. Create EXACTLY ${questionCount} multiple-choice questions in ${language} based ONLY on the PDF below. Take your time: each question must require real understanding, not memorization.
+
+GLOBAL RULES (CRITICAL):
+- You MUST treat the provided PDF content as your ONLY source of truth.
+- Do NOT use any outside knowledge, training data, or assumptions that are not explicitly supported by the PDF text.
+- If something is not clearly stated or directly implied in the PDF, you must NOT base a question or answer on it.
+- The "questions" array in the JSON MUST contain EXACTLY ${questionCount} items — never more, never fewer.
+
+DIFFICULTY:
+- Target difficulty level: "${difficulty}" (one of: easy, medium, hard).
+- For "easy": focus on fundamental definitions and direct facts from the text.
+- For "medium": mix understanding questions, simple applications and short reasoning.
+- For "hard": emphasize analysis, cause-effect, application, comparison and "which conclusion is correct?" styles.
 
 STYLE:
 - Questions: LONG and DETAILED. Each question must be at least 2–3 full sentences. Pose scenarios, compare alternatives, or ask "According to the text, why / how / when...?" Do not ask one-line trivia.
 - Options: LONG and DETAILED. Each option must be a full sentence or two (or a clear list of points), explaining the answer. Never use options like "Only X" or 2–3 words. Wrong options must be plausible but clearly wrong given the text.
-- Difficulty: ${difficulty} but on the HARD side. Prefer analytical, cause-effect, application, and "which conclusion is correct?" types. Avoid trivial yes/no or one-word answers.
 - Do NOT use "Tüm yukarıdaki", "Yukarıdakilerin hiçbiri", "All of the above" or "None of the above".
 - Each question must be answerable only from the PDF. explanation: 1–2 sentences citing the text and why the answer is correct.
 
@@ -71,7 +82,7 @@ Return ONLY valid JSON, no markdown, no other text. Format (options and correct_
   ]
 }
 
-Exactly ${questionCount} questions. Language: ${language}. Return ONLY the JSON object.`;
+Exactly ${questionCount} questions. The JSON MUST have ${questionCount} questions in the "questions" array. Language: ${language}. Return ONLY the JSON object.`;
 
   try {
     const result = await model.generateContent(prompt);
@@ -128,6 +139,11 @@ export async function analyzePDF(pdfText) {
 
   const prompt = `You are an expert educational content analyzer.
 
+GLOBAL RULES (CRITICAL):
+- You MUST treat the provided PDF content as your ONLY source of truth.
+- Do NOT use any outside knowledge, training data, or assumptions that are not explicitly supported by the PDF text.
+- Summaries, key points and difficulty must be grounded ONLY in what appears in the PDF.
+
 Analyze the following PDF content and provide:
 1. A concise summary (2-3 sentences in Turkish)
 2. 5-7 key points or main topics
@@ -176,7 +192,12 @@ export async function answerQuestionAboutPDF(pdfText, question) {
 
   const prompt = `Sen, öğrencilere yardımcı olan çok dikkatli bir asistanısın.
 
-SADECE aşağıdaki PDF içeriğine dayanarak cevap verebilirsin.
+GLOBAL KURAL (ÇOK ÖNEMLİ):
+- SADECE aşağıdaki PDF içeriğine dayanarak cevap verebilirsin.
+- PDF dışında, genel kültüründen veya eğitildiğin verilerden hiçbir bilgi kullanmayacaksın.
+- PDF'de açıkça yazmayan veya doğrudan çıkarılamayan hiçbir bilgiyi tahmin etmeyecek, uydurmayacak veya genişletmeyeceksin.
+
+EK KURALLAR:
 - Eğer soru PDF'de açık ve net bir şekilde yanıtlanmıyorsa, şu cümleyi aynen yaz:
 - "Bu soru, verilen PDF içeriğine dayanarak yanıtlanamıyor."
 - PDF dışı genel bilgi, tahmin veya yorum ekleme.
@@ -220,6 +241,11 @@ export async function generateFlashcardsFromPDF(pdfText, options = {}) {
   const model = getGeminiModel();
 
   const prompt = `You are an expert educator. Create ${cardCount} flashcard pairs for studying, based ONLY on the PDF content below. Each card has a "front" (question or term) and "back" (answer or definition). Use ${language}.
+
+GLOBAL RULES (CRITICAL):
+- You MUST treat the provided PDF content as your ONLY source of truth.
+- Do NOT use any outside knowledge, training data, or assumptions that are not explicitly supported by the PDF text.
+- If something is not clearly stated or directly implied in the PDF, you must NOT invent or extend it.
 
 RULES:
 - Front: clear question or key term/concept from the text.

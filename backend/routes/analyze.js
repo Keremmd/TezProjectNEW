@@ -1,7 +1,6 @@
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { analyzePDF as analyzePDFGemini, answerQuestionAboutPDF as answerQuestionAboutPDFGemini } from '../utils/gemini.js';
-import { answerQuestionAboutPDF as answerQuestionAboutPDFGroq } from '../utils/groq.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -12,11 +11,8 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY
 );
 
-// For Q&A we can switch provider via AI_PROVIDER
-const answerQuestionAboutPDF =
-  process.env.AI_PROVIDER === 'groq' && process.env.GROQ_API_KEY
-    ? answerQuestionAboutPDFGroq
-    : answerQuestionAboutPDFGemini;
+// For Q&A we always use Gemini (Groq temporarily disabled)
+const answerQuestionAboutPDF = answerQuestionAboutPDFGemini;
 
 /**
  * POST /api/analyze/pdf

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -59,6 +59,8 @@ const Dashboard = () => {
     lastName: '',
     university: ''
   });
+  const [profileImagePreview, setProfileImagePreview] = useState(null);
+  const [profileImageUploading, setProfileImageUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState(null);
   const [userPDFs, setUserPDFs] = useState([]);
@@ -118,6 +120,7 @@ const Dashboard = () => {
   const [deleteCommunityPostModalOpen, setDeleteCommunityPostModalOpen] = useState(false);
   const [communityPostToDelete, setCommunityPostToDelete] = useState(null);
   const [deletingCommunityPost, setDeletingCommunityPost] = useState(false);
+  const profileImageInputRef = useRef(null);
   
   // Quiz states
   const [quizzes, setQuizzes] = useState([]);
@@ -153,6 +156,9 @@ const Dashboard = () => {
         lastName: user.user_metadata?.last_name || '',
         university: user.user_metadata?.university || ''
       });
+      if (user.user_metadata?.avatar_url) {
+        setProfileImagePreview(user.user_metadata.avatar_url);
+      }
     }
   }, [user]);
 
@@ -1490,6 +1496,67 @@ const Dashboard = () => {
     }
   };
 
+  // Handle profile image upload
+  const handleProfileImageChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file || !user) return;
+
+    if (!file.type.startsWith('image/')) {
+      setSaveMessage({ type: 'error', text: 'Please select a valid image file.' });
+      setTimeout(() => setSaveMessage(null), 3000);
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setSaveMessage({ type: 'error', text: 'Maximum image size is 5MB.' });
+      setTimeout(() => setSaveMessage(null), 3000);
+      return;
+    }
+
+    setProfileImageUploading(true);
+    setSaveMessage(null);
+
+    try {
+      const fileExt = file.name.split('.').pop();
+      const filePath = `avatars/${user.id}/${Date.now()}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      const publicUrl = publicUrlData?.publicUrl;
+
+      if (publicUrl) {
+        const { error: updateError } = await supabase.auth.updateUser({
+          data: {
+            avatar_url: publicUrl
+          }
+        });
+
+        if (updateError) throw updateError;
+
+        setProfileImagePreview(publicUrl);
+        setSaveMessage({ type: 'success', text: 'Profile photo updated!' });
+        setTimeout(() => setSaveMessage(null), 3000);
+      }
+    } catch (error) {
+      console.error('Error updating profile image:', error);
+      setSaveMessage({ type: 'error', text: 'Failed to update profile photo.' });
+      setTimeout(() => setSaveMessage(null), 3000);
+    } finally {
+      setProfileImageUploading(false);
+      if (event.target) {
+        event.target.value = '';
+      }
+    }
+  };
+
   // Mock data
   // Calculate user statistics
   const sharedPDFsCount = userPDFs.filter(pdf => pdf.privacy === 'public').length;
@@ -1877,10 +1944,18 @@ const Dashboard = () => {
               </button>
               
               <div className="flex items-center space-x-3 pl-4 border-l border-gray-200 dark:border-zinc-800">
-                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
-                  <span className="text-white font-bold">
-                    {user?.user_metadata?.first_name?.charAt(0).toUpperCase() || 'U'}
-                  </span>
+                <div className="w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center">
+                  {profileImagePreview ? (
+                    <img
+                      src={profileImagePreview}
+                      alt="Profile"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-white font-bold">
+                      {user?.user_metadata?.first_name?.charAt(0).toUpperCase() || 'U'}
+                    </span>
+                  )}
                 </div>
                 <div className="hidden md:block">
                   <p className="text-sm font-medium text-gray-900 dark:text-white">
@@ -1893,66 +1968,81 @@ const Dashboard = () => {
         </header>
 
         {/* Main Content Area */}
-        <main className="flex-1 p-6 overflow-y-auto bg-transparent">
+        <main className="flex-1 p-6 overflow-y-auto bg-gray-50 dark:bg-gradient-to-b dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950">
           {activeSection === 'home' && (
             <div className="space-y-6">
               {/* Welcome Section */}
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-                  {t('home_welcome', { name: user?.user_metadata?.first_name || 'User' })}
-                </h1>
-                <p className="text-gray-600 dark:text-gray-400">
-                  {t('home_subtitle')}
-                </p>
+              <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-purple-500 dark:text-purple-400 mb-2">
+                    Dashboard
+                  </p>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-1">
+                    {t('home_welcome', { name: user?.user_metadata?.first_name || 'User' })}
+                  </h1>
+                  <p className="text-gray-500 dark:text-gray-400 text-sm">
+                    {t('home_subtitle')}
+                  </p>
+                </div>
+                <div className="flex gap-2 items-center">
+                  <span className="px-3 py-1 rounded-full text-xs font-medium bg-zinc-900 text-zinc-200 border border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
+                    StudyPDF • Beta
+                  </span>
+                </div>
               </div>
 
-              {/* Stats Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {stats.map((stat, index) => {
-                  const Icon = stat.icon;
-                  return (
-                    <motion.div
-                      key={index}
-                      whileHover={{ y: -4 }}
-                      className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-gray-300 dark:hover:border-zinc-700 transition-colors"
-                    >
-                      <div className="flex items-center justify-between mb-4">
-                        <div className={`w-12 h-12 bg-gradient-to-br ${stat.color} rounded-lg flex items-center justify-center`}>
-                          <Icon className="w-6 h-6 text-white" />
+              {/* Stats + Upload row */}
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                {/* Stats Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 xl:col-span-2">
+                  {stats.map((stat, index) => {
+                    const Icon = stat.icon;
+                    return (
+                      <motion.div
+                        key={index}
+                        whileHover={{ y: -4, scale: 1.01 }}
+                        className="relative overflow-hidden bg-white dark:bg-zinc-900/70 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 hover:border-purple-500/60 transition-all shadow-sm dark:shadow-none"
+                      >
+                        <div
+                          className={`absolute inset-x-0 -top-10 h-24 bg-gradient-to-r ${stat.color} opacity-20 blur-2xl pointer-events-none`}
+                        />
+                        <div className="flex items-center justify-between mb-4">
+                          <div
+                            className={`w-11 h-11 bg-gradient-to-br ${stat.color} rounded-xl flex items-center justify-center shadow-lg shadow-black/40`}
+                          >
+                            <Icon className="w-5 h-5 text-white" />
+                          </div>
                         </div>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-2xl font-bold text-gray-900 dark:text-white">{stat.value}</p>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">{stat.label}</p>
-                        <p className="text-xs text-green-400">{stat.change}</p>
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
+                        <div className="space-y-1">
+                          <p className="text-2xl font-semibold text-gray-900 dark:text-white">{stat.value}</p>
+                          <p className="text-sm text-gray-500 dark:text-zinc-300">{stat.label}</p>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
 
-              {/* PDF Upload Area */}
-              <div
-                onDragEnter={handleDrag}
-                onDragLeave={handleDrag}
-                onDragOver={handleDrag}
-                onDrop={handleDrop}
-                className={`bg-white dark:bg-zinc-900 border-2 border-dashed ${
-                  dragActive ? 'border-blue-500 bg-blue-500/10 dark:border-white dark:bg-zinc-800' : 'border-gray-300 dark:border-zinc-700'
-                } rounded-xl p-12 text-center transition-all`}
-              >
-                <div className="flex flex-col items-center space-y-4">
-                  <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
-                    <Upload className="w-8 h-8 text-white" />
+                {/* PDF Upload Area */}
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-white dark:bg-zinc-900/80 border border-dashed border-zinc-300 dark:border-zinc-700 rounded-2xl p-6 flex flex-col items-center justify-center text-center gap-4 shadow-sm dark:shadow-none min-h-[210px]"
+                  onDragEnter={handleDrag}
+                  onDragLeave={handleDrag}
+                  onDragOver={handleDrag}
+                  onDrop={handleDrop}
+                >
+                  <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-xl flex items-center justify-center">
+                    <Upload className="w-6 h-6 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
                       {t('home_upload_title')}
                     </h3>
-                    <p className="text-gray-600 dark:text-gray-400 mb-4">
+                    <p className="text-sm text-gray-500 dark:text-zinc-400 mb-4">
                       {t('home_upload_subtitle')}
                     </p>
-                    <label className="px-6 py-3 bg-gray-100 dark:bg-white text-gray-900 dark:text-black rounded-lg font-semibold border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors cursor-pointer inline-block">
+                    <label className="px-4 py-2.5 bg-gray-100 text-gray-900 dark:bg-white dark:text-gray-900 rounded-lg font-semibold border border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-zinc-100 cursor-pointer inline-flex items-center gap-2 text-sm">
                       {t('home_upload_button')}
                       <input
                         type="file"
@@ -1962,10 +2052,10 @@ const Dashboard = () => {
                       />
                     </label>
                   </div>
-                  <p className="text-sm text-gray-500">
-                    Maksimum 50MB • PDF formatı
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-500">
+                    {t('home_upload_hint')}
                   </p>
-                </div>
+                </motion.div>
               </div>
 
               {/* Recent PDFs */}
@@ -2132,19 +2222,21 @@ const Dashboard = () => {
                 {userPDFs.length > 0 ? userPDFs.map((pdf) => (
                   <motion.div
                     key={pdf.id}
-                    whileHover={{ y: -4 }}
-                    className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-gray-300 dark:hover:border-zinc-700 transition-all"
+                    whileHover={{ y: -6, scale: 1.01 }}
+                    className="relative bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-5 hover:border-purple-400/70 dark:hover:border-purple-500/70 transition-all shadow-sm dark:shadow-none"
                   >
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-center space-x-3 flex-1">
-                        <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                          <FileText className="w-6 h-6 text-white" />
+                        <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md shadow-purple-500/30">
+                          <FileText className="w-5 h-5 text-white" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-1 truncate">
-                            {pdf.file_name}
-                          </h3>
-                          <p className="text-xs text-gray-600 dark:text-gray-400">
+                          <div className="inline-flex items-center rounded-full bg-gray-50 dark:bg-zinc-800/80 px-3 py-1 mb-1 max-w-full">
+                            <span className="text-[11px] font-medium text-gray-900 dark:text-white truncate">
+                              {pdf.file_name}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400">
                             {new Date(pdf.created_at).toLocaleDateString()}
                           </p>
                         </div>
@@ -2152,16 +2244,16 @@ const Dashboard = () => {
                     </div>
                     
                     {/* PDF Details */}
-                    <div className="space-y-2 mb-4">
-                      <div className="flex items-center justify-between text-sm">
+                    <div className="space-y-1.5 mb-4">
+                      <div className="flex items-center justify-between text-xs">
                         <span className="text-gray-500 dark:text-gray-400">
                           {t('pdf_card_course')}
                         </span>
-                        <span className="text-gray-900 dark:text-white font-medium">
+                        <span className="text-gray-900 dark:text-white font-medium truncate max-w-[55%] text-right">
                           {pdf.course_name}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center justify-between text-xs">
                         <span className="text-gray-500 dark:text-gray-400">
                           {t('pdf_card_university')}
                         </span>
@@ -2169,7 +2261,7 @@ const Dashboard = () => {
                           {pdf.university}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center justify-between text-xs">
                         <span className="text-gray-500 dark:text-gray-400">
                           {t('pdf_card_grade')}
                         </span>
@@ -2177,7 +2269,7 @@ const Dashboard = () => {
                           {pdf.grade}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center justify-between text-xs">
                         <span className="text-gray-500 dark:text-gray-400">
                           {t('pdf_card_privacy')}
                         </span>
@@ -2193,13 +2285,13 @@ const Dashboard = () => {
                             : t('pdf_card_privacy_private')}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center justify-between text-xs">
                         <span className="text-gray-500 dark:text-gray-400">
                           {t('pdf_card_status')}
                         </span>
                         <button
                           onClick={() => handleStatusToggle(pdf.id, pdf.status)}
-                          className={`font-medium px-3 py-1 rounded-full transition-all hover:opacity-80 text-xs ${
+                          className={`font-medium px-2.5 py-0.5 rounded-full transition-all hover:opacity-80 text-[11px] ${
                             pdf.status === 'completed'
                               ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
                               : 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'
@@ -2216,7 +2308,7 @@ const Dashboard = () => {
                       <div className="flex flex-wrap items-center gap-2">
                         <button 
                           onClick={() => navigate(`/pdf/${pdf.id}`)}
-                          className="flex-1 min-w-0 px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-sm font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
+                          className="flex-1 min-w-0 px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-xs font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
                         >
                           {t('pdf_card_open')}
                         </button>
@@ -2228,7 +2320,7 @@ const Dashboard = () => {
                               setCreateDeckCardCount(12);
                               setCreateDeckModalOpen(true);
                             }}
-                            className="px-3 py-2 border-2 border-purple-300 dark:border-purple-600 text-purple-600 dark:text-purple-400 text-sm font-medium rounded-lg hover:bg-purple-50 dark:hover:bg-purple-500/10 transition-colors flex items-center gap-1.5"
+                            className="px-3 py-2 border-2 border-purple-300 dark:border-purple-600 text-purple-600 dark:text-purple-400 text-xs font-medium rounded-lg hover:bg-purple-50 dark:hover:bg-purple-500/10 transition-colors flex items-center gap-1.5"
                             title="Create flashcard deck from this PDF"
                           >
                             <Layers className="w-4 h-4" />
@@ -2293,31 +2385,42 @@ const Dashboard = () => {
                 {courses.length > 0 ? courses.map((course) => (
                   <motion.div
                     key={course.id}
-                    whileHover={{ y: -4 }}
-                    className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-gray-300 dark:hover:border-zinc-700 transition-all"
+                    whileHover={{ y: -6, scale: 1.01 }}
+                    className="relative bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-6 hover:border-purple-400/70 dark:hover:border-purple-500/70 transition-all shadow-sm dark:shadow-none"
                   >
+                    {/* Header */}
                     <div className="flex items-start justify-between mb-4">
-                      <div>
-                        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{course.title}</h3>
-                        <div className="flex items-center space-x-4 text-sm text-gray-600 dark:text-gray-400">
-                          <span>{course.total_pdfs || 0} PDF</span>
-                          <span>•</span>
-                          <span>{course.total_quizzes || 0} Quiz</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="mb-2 max-w-full">
+                          <span className="inline-block text-base font-semibold text-gray-50 dark:text-white truncate">
+                            {course.title}
+                          </span>
+                        </div>
+                        <div className="flex items-center flex-wrap gap-2 text-[11px] text-gray-600 dark:text-gray-400">
+                          <span className="px-2 py-0.5 rounded-full bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300">
+                            {(course.total_pdfs || 0)} PDF
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300">
+                            {(course.total_quizzes || 0)} Quiz
+                          </span>
                         </div>
                         {course.description && (
-                          <p className="text-sm text-gray-500 mt-2">{course.description}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 line-clamp-2">
+                            {course.description}
+                          </p>
                         )}
                       </div>
-                      <button 
+                      <button
                         onClick={() => toggleFavorite(course.id)}
-                        className={`p-2 transition-colors ${
-                          favoriteCourses.includes(course.id) 
-                            ? 'text-yellow-500 dark:text-yellow-400' 
-                            : 'text-gray-500 dark:text-gray-400 hover:text-yellow-500 dark:hover:text-yellow-400'
+                        className={`p-2 rounded-full border border-transparent transition-colors ${
+                          favoriteCourses.includes(course.id)
+                            ? 'text-yellow-500 dark:text-yellow-400 bg-yellow-500/10'
+                            : 'text-gray-500 dark:text-gray-400 hover:text-yellow-500 dark:hover:text-yellow-400 hover:bg-yellow-500/10'
                         }`}
+                        title="Favorite"
                       >
-                        <Star 
-                          className="w-5 h-5" 
+                        <Star
+                          className="w-4 h-4"
                           fill={favoriteCourses.includes(course.id) ? 'currentColor' : 'none'}
                         />
                       </button>
@@ -2325,28 +2428,30 @@ const Dashboard = () => {
 
                     {/* Progress */}
                     <div className="space-y-2 mb-4">
-                      <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center justify-between text-xs">
                         <span className="text-gray-500 dark:text-gray-400">
                           {t('courses_progress_label')}
                         </span>
-                        <span className="text-gray-900 dark:text-white font-medium">{course.progress}%</span>
+                        <span className="text-gray-900 dark:text-white font-medium">
+                          {course.progress}%
+                        </span>
                       </div>
-                      <div className="w-full bg-gray-200 dark:bg-zinc-800 rounded-full h-2">
+                      <div className="w-full h-2 rounded-full bg-gray-100 dark:bg-zinc-800 overflow-hidden">
                         <div
-                          className="h-2 rounded-full bg-gradient-to-r from-blue-500 to-purple-500"
+                          className="h-2 rounded-full bg-gradient-to-r from-blue-500 via-purple-500 to-orange-400 transition-all duration-300"
                           style={{ width: `${course.progress}%` }}
                         />
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-zinc-800">
-                      <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center space-x-1">
+                    <div className="flex items-center justify-between pt-3 border-t border-gray-200 dark:border-zinc-800">
+                      <span className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center space-x-1">
                         <Clock className="w-3 h-3" />
                         <span>{new Date(course.created_at).toLocaleDateString()}</span>
                       </span>
-                      <button 
+                      <button
                         onClick={() => setSelectedCourse(course)}
-                        className="px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-sm font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
+                        className="px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-xs font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
                       >
                         {t('courses_continue_button')}
                       </button>
@@ -2426,34 +2531,36 @@ const Dashboard = () => {
                   return (
                   <motion.div
                     key={quiz.id}
-                    whileHover={{ x: 4 }}
-                    className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-gray-300 dark:hover:border-zinc-700 transition-all cursor-pointer"
+                    whileHover={{ y: -4, scale: 1.01 }}
+                    className="relative bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-5 hover:border-purple-400/70 dark:hover:border-purple-500/70 transition-all cursor-pointer shadow-sm dark:shadow-none"
                     onClick={() => navigate(`/quiz/${quiz.id}`)}
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-4 flex-1">
-                        <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center">
-                          <Brain className="w-6 h-6 text-white" />
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start space-x-3 flex-1">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0 shadow-md shadow-purple-500/30">
+                          <Brain className="w-5 h-5 text-white" />
                         </div>
-                        <div className="flex-1">
-                          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1 flex items-center space-x-2">
-                            <span>{quiz.title}</span>
-                            <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                              quiz.privacy === 'public'
-                                ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400'
-                                : 'bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-gray-400'
-                            }`}>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1 flex items-center space-x-2 truncate">
+                            <span className="truncate">{quiz.title}</span>
+                            <span
+                              className={`px-2 py-0.5 text-[11px] font-medium rounded-full ${
+                                quiz.privacy === 'public'
+                                  ? 'bg-blue-500/15 text-blue-500 dark:text-blue-400'
+                                  : 'bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-gray-400'
+                              }`}
+                            >
                               {quiz.privacy === 'public' ? 'Public' : 'Private'}
                             </span>
                           </h3>
-                          <div className="flex items-center space-x-4 text-sm text-gray-600 dark:text-gray-400">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
                             <span>
                               {t('quiz_questions_label', { count: quiz.total_questions })}
                             </span>
                             {lastScoreByQuizId[quiz.id] && (
                               <>
                                 <span>•</span>
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 text-xs font-medium border border-emerald-500/30">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 text-[11px] font-medium border border-emerald-500/30">
                                   {t('quiz_score_label', {
                                     score: lastScoreByQuizId[quiz.id].score,
                                     total: lastScoreByQuizId[quiz.id].total_points,
@@ -2462,7 +2569,7 @@ const Dashboard = () => {
                               </>
                             )}
                             <span>•</span>
-                            <span className={`capitalize px-2 py-1 rounded text-xs ${
+                            <span className={`capitalize px-2 py-0.5 rounded-full text-[11px] ${
                               quiz.difficulty === 'easy' ? 'bg-green-500/20 text-green-400' :
                               quiz.difficulty === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
                               'bg-red-500/20 text-red-400'
@@ -2492,7 +2599,7 @@ const Dashboard = () => {
                             e.stopPropagation();
                             navigate(`/quiz/${quiz.id}`);
                           }}
-                          className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
+                          className="px-5 py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-white text-xs font-semibold rounded-lg hover:opacity-90 transition-opacity"
                         >
                         {t('quiz_start_button')}
                         </button>
@@ -2501,7 +2608,7 @@ const Dashboard = () => {
                             e.stopPropagation();
                             navigate(`/flashcards/quiz/${quiz.id}`);
                           }}
-                          className="px-4 py-2 border-2 border-gray-300 dark:border-zinc-600 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors flex items-center gap-1.5"
+                          className="px-4 py-2 border-2 border-gray-300 dark:border-zinc-600 text-gray-700 dark:text-gray-300 text-xs font-medium rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors flex items-center gap-1.5"
                           title="Study as flashcards"
                         >
                           <Layers className="w-4 h-4" />
@@ -2523,13 +2630,6 @@ const Dashboard = () => {
                     {/* Attempt history */}
                     {attemptsForQuiz.length > 0 && (
                       <div className="mt-4 pt-4 border-t border-gray-200 dark:border-zinc-800">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                            {t('analytics_attempts_label', {
-                              count: attemptsForQuiz.length,
-                            })}
-                          </p>
-                        </div>
                         <div className="flex flex-wrap gap-1.5">
                           {attemptsForQuiz
                             .slice(-3)
@@ -2552,7 +2652,7 @@ const Dashboard = () => {
                                   className="px-2.5 py-1 rounded-full bg-purple-500/10 text-[11px] text-purple-500 dark:text-purple-300 border border-purple-500/30"
                                 >
                                   <span className="font-medium">
-                                    {displayIndex}. deneme
+                                    {t('quiz_attempt_chip_label', { index: displayIndex })}
                                   </span>
                                   <span className="opacity-75">
                                     {' '}
@@ -2619,8 +2719,8 @@ const Dashboard = () => {
                     {pdfDecks.map((deck) => (
                       <motion.div
                         key={deck.id}
-                        whileHover={{ scale: 1.02 }}
-                        className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-purple-400 dark:hover:border-purple-500 transition-all relative group"
+                        whileHover={{ y: -4, scale: 1.01 }}
+                        className="relative bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-5 hover:border-purple-400/70 dark:hover:border-purple-500/70 transition-all shadow-sm dark:shadow-none group"
                       >
                         {/* Delete deck button */}
                         <button
@@ -2632,19 +2732,19 @@ const Dashboard = () => {
                         </button>
 
                         <div className="flex items-start gap-4">
-                          <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center flex-shrink-0">
-                            <FileText className="w-6 h-6 text-white" />
+                          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center flex-shrink-0 shadow-md shadow-amber-500/30">
+                            <FileText className="w-5 h-5 text-white" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+                            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1 truncate">
                               {deck.title}
                             </h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
                               {t('flashcards_pdf_deck_badge')}
                             </p>
                             <button
                               onClick={() => navigate(`/flashcards/deck/${deck.id}`)}
-                              className="mt-4 px-4 py-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
+                              className="mt-4 px-4 py-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white text-xs font-semibold rounded-lg hover:opacity-90 transition-opacity"
                             >
                               {t('flashcards_study_deck_button')}
                             </button>
@@ -2666,8 +2766,8 @@ const Dashboard = () => {
                     quizzes.map((quiz) => (
                       <motion.div
                         key={quiz.id}
-                        whileHover={{ scale: 1.02 }}
-                        className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-purple-400 dark:hover:border-purple-500 transition-all relative group"
+                        whileHover={{ y: -4, scale: 1.01 }}
+                        className="relative bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-5 hover:border-purple-400/70 dark:hover:border-purple-500/70 transition-all group shadow-sm dark:shadow-none"
                       >
                         {/* Delete quiz deck button (removes quiz + its cards) */}
                         <button
@@ -2682,21 +2782,21 @@ const Dashboard = () => {
                         </button>
 
                         <div className="flex items-start gap-4">
-                          <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
-                            <Layers className="w-6 h-6 text-white" />
+                          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0 shadow-md shadow-purple-500/30">
+                            <Layers className="w-5 h-5 text-white" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+                            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1 truncate">
                               {quiz.title}
                             </h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
                               {t('flashcards_quiz_cards_label', {
                                 count: quiz.total_questions,
                               })}
                             </p>
                             <button
                               onClick={() => navigate(`/flashcards/quiz/${quiz.id}`)}
-                              className="mt-4 px-4 py-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity"
+                              className="mt-4 px-4 py-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white text-xs font-semibold rounded-lg hover:opacity-90 transition-opacity"
                             >
                               {t('flashcards_study_deck_button')}
                             </button>
@@ -2776,7 +2876,7 @@ const Dashboard = () => {
               </div>
 
               {/* Filters */}
-              <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6">
+              <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm dark:shadow-none">
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
                   {t('shared_filters_title')}
                 </h3>
@@ -2894,18 +2994,22 @@ const Dashboard = () => {
                   return (
                     <motion.div
                       key={pdf.id}
-                      whileHover={{ scale: 1.02 }}
-                      className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6 hover:border-gray-300 dark:hover:border-zinc-700 transition-all"
+                      whileHover={{ y: -4, scale: 1.01 }}
+                      className="relative bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-6 hover:border-purple-400/70 dark:hover:border-purple-500/70 transition-all shadow-sm dark:shadow-none"
                     >
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex items-center space-x-3 flex-1">
-                          <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                            <FileText className="w-6 h-6 text-white" />
+                          <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md shadow-purple-500/30">
+                            <FileText className="w-5 h-5 text-white" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1 truncate">{pdf.file_name}</h3>
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                              <span className="text-purple-500 dark:text-purple-400 font-medium">Public PDF</span>
+                            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1 truncate">
+                              {pdf.file_name}
+                            </h3>
+                            <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">
+                              <span className="text-purple-500 dark:text-purple-400 font-medium">
+                                Public PDF
+                              </span>
                             </p>
                             <div className="flex items-center space-x-2 text-xs flex-wrap gap-1">
                               <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
@@ -2914,13 +3018,13 @@ const Dashboard = () => {
                               <span className="px-2 py-0.5 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-gray-400 rounded">
                                 Grade {pdf.grade}
                               </span>
-                              <span className="px-2 py-0.5 bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded">
+                              <span className="px-2 py-0.5 bg-blue-500/15 text-blue-600 dark:text-blue-400 rounded">
                                 {pdf.course_name}
                               </span>
                             </div>
                           </div>
                         </div>
-                        <span className="px-3 py-1 text-xs font-medium rounded-full bg-blue-500/20 text-blue-600 dark:text-blue-400 flex-shrink-0">
+                        <span className="px-3 py-1 text-[11px] font-medium rounded-full bg-blue-500/20 text-blue-600 dark:text-blue-400 flex-shrink-0">
                           PDF
                         </span>
                       </div>
@@ -3156,18 +3260,18 @@ const Dashboard = () => {
 
           {activeSection === 'community' && (
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-4">
                 <div>
                   <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
                     {t('section_community_title')}
                   </h1>
-                  <p className="text-gray-500 dark:text-gray-400">
+                  <p className="text-gray-500 dark:text-gray-400 text-sm">
                     {t('section_community_subtitle')}
                   </p>
                 </div>
                 <button
                   onClick={() => setCommunityPostModalOpen(true)}
-                  className="flex items-center space-x-2 px-4 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-lg font-semibold hover:opacity-90 transition-opacity"
+                  className="inline-flex items-center space-x-2 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl text-sm font-semibold shadow-md shadow-blue-500/30 hover:shadow-lg hover:shadow-blue-500/40 transition-all"
                 >
                   <ImagePlus className="w-5 h-5" />
                   <span>{t('community_add_post')}</span>
@@ -3175,9 +3279,12 @@ const Dashboard = () => {
               </div>
 
               {/* Course Filter */}
-              <div className="bg-gray-100 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-4">
-                <div className="flex items-center gap-3">
-                  <Search className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+              <div className="relative overflow-hidden bg-white dark:bg-zinc-900/80 border border-gray-200 dark:border-zinc-800 rounded-2xl p-4 md:p-5 shadow-sm dark:shadow-none">
+                <div className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-gradient-to-br from-purple-500/20 via-blue-500/10 to-transparent blur-3xl" />
+                <div className="relative flex items-center gap-3">
+                  <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-zinc-100 dark:bg-zinc-800">
+                    <Search className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                  </div>
                   <input
                     type="text"
                     value={communityFilterCourse}
@@ -3185,7 +3292,7 @@ const Dashboard = () => {
                       setCommunityFilterCourse(e.target.value);
                     }}
                     placeholder={t('community_filter_placeholder')}
-                    className="flex-1 px-4 py-2 bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 px-4 py-2.5 bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-purple-500/80 focus:border-transparent"
                   />
                   {communityFilterCourse && (
                     <button
@@ -3193,7 +3300,7 @@ const Dashboard = () => {
                         setCommunityFilterCourse('');
                         loadCommunityPosts();
                       }}
-                        className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                      className="px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
                     >
                       {t('community_clear_filter')}
                     </button>
@@ -3202,35 +3309,40 @@ const Dashboard = () => {
               </div>
 
               {communityLoading ? (
-                <div className="flex justify-center py-12">
-                  <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                <div className="flex justify-center py-16">
+                  <div className="w-10 h-10 border-2 border-purple-500/70 border-t-transparent rounded-full animate-spin" />
                 </div>
               ) : communityPosts.length === 0 ? (
-                <div className="bg-gray-100 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-12 text-center">
-                  <MessageCircle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-600 dark:text-gray-400 mb-2">No posts yet</p>
-                  <p className="text-gray-500 dark:text-gray-500 text-sm mb-4">Be the first to share a photo: ask a question or open a topic, others can respond with comments.</p>
-                  <button
-                    onClick={() => setCommunityPostModalOpen(true)}
-                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-                  >
-                    Add Post
-                  </button>
+                <div className="relative overflow-hidden bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-12 text-center shadow-sm dark:shadow-none">
+                  <div className="pointer-events-none absolute inset-x-0 -top-16 h-32 bg-gradient-to-r from-purple-500/15 via-blue-500/10 to-transparent blur-3xl" />
+                  <div className="relative">
+                    <MessageCircle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-700 dark:text-gray-300 mb-2 text-lg font-medium">No posts yet</p>
+                    <p className="text-gray-500 dark:text-gray-400 text-sm mb-6 max-w-xl mx-auto">
+                      Be the first to share a photo: ask a question or open a topic, others can respond with comments.
+                    </p>
+                    <button
+                      onClick={() => setCommunityPostModalOpen(true)}
+                      className="inline-flex items-center px-4 py-2.5 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl text-sm font-semibold shadow-md hover:shadow-lg transition-all"
+                    >
+                      Add Post
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {communityPosts.map((post) => (
                     <motion.div
                       key={post.id}
-                      whileHover={{ y: -2 }}
-                      className="bg-gray-100 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl overflow-hidden cursor-pointer hover:border-blue-500/50 transition-colors relative group"
+                      whileHover={{ y: -4, scale: 1.01 }}
+                      className="relative bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl overflow-hidden cursor-pointer hover:border-purple-500/60 transition-all shadow-sm dark:shadow-none group"
                       onClick={() => openCommunityPostDetail(post)}
                     >
                       {/* Delete button - only show for user's own posts */}
                       {user && post.user_id === user.id && (
                         <button
                           onClick={(e) => handleDeleteCommunityPost(post, e)}
-                          className="absolute top-2 right-2 z-10 p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                          className="absolute top-2 right-2 z-10 p-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
                           title="Delete post"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -3243,15 +3355,22 @@ const Dashboard = () => {
                           className="w-full h-full object-cover"
                         />
                       </div>
-                      <div className="p-4">
-                        {post.course_name && (
-                          <span className="inline-block px-2 py-1 mb-2 text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30 rounded">
-                            {post.course_name}
+                      <div className="p-4 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          {post.course_name && (
+                            <span className="inline-block px-2.5 py-1 text-[11px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 rounded-full">
+                              {post.course_name}
+                            </span>
+                          )}
+                          <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                            {new Date(post.created_at).toLocaleDateString('tr-TR')}
                           </span>
-                        )}
-                        <p className="text-gray-900 dark:text-white font-medium line-clamp-2 mb-1">{post.caption || 'No description'}</p>
+                        </div>
+                        <p className="text-sm text-gray-900 dark:text-white font-medium line-clamp-2">
+                          {post.caption || 'No description'}
+                        </p>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                          {post.author_name || 'User'} · {new Date(post.created_at).toLocaleDateString('tr-TR')}
+                          {post.author_name || 'User'}
                         </p>
                       </div>
                     </motion.div>
@@ -3272,150 +3391,122 @@ const Dashboard = () => {
                 </p>
               </div>
 
-              {/* Profile Settings */}
-              <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Profile Information</h2>
-                <div className="space-y-4">
-                  <div className="flex items-center space-x-4">
-                    <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
-                      <span className="text-white font-bold text-2xl">K</span>
-                    </div>
-                    <button className="px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-black text-sm font-medium rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors">
-                      Change Photo
-                    </button>
-                  </div>
-                  <form onSubmit={handleProfileUpdate} className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          First Name
-                        </label>
-                        <input
-                          type="text"
-                          value={profileData.firstName}
-                          onChange={(e) => setProfileData({...profileData, firstName: e.target.value})}
-                          className="w-full px-4 py-3 bg-gray-50 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-white focus:border-transparent"
-                        />
+              {/* Profile Settings - simplified & modernized */}
+              <div className="relative overflow-hidden bg-white dark:bg-zinc-950 border border-gray-200/60 dark:border-zinc-800 rounded-2xl p-6 md:p-8 shadow-lg shadow-black/20">
+                <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-gradient-to-br from-purple-500/30 via-blue-500/20 to-transparent blur-3xl" />
+                <div className="relative">
+                  <h2 className="text-xl md:text-2xl font-semibold text-gray-900 dark:text-white mb-6">
+                    Profile Information
+                  </h2>
+                  <div className="flex flex-col md:flex-row md:items-start md:space-x-8 space-y-6 md:space-y-0">
+                    <div className="flex flex-col items-center md:items-start space-y-4">
+                      <div className="relative">
+                        <div className="w-20 h-20 md:w-24 md:h-24 rounded-full overflow-hidden ring-4 ring-white/10 bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center">
+                          {profileImagePreview ? (
+                            <img
+                              src={profileImagePreview}
+                              alt="Profile"
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <span className="text-white font-bold text-2xl">
+                              {profileData.firstName?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Last Name
-                        </label>
+                        <button
+                          type="button"
+                          onClick={() => profileImageInputRef.current?.click()}
+                          disabled={profileImageUploading}
+                          className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-900 text-white dark:bg-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {profileImageUploading ? 'Uploading...' : 'Change Photo'}
+                        </button>
                         <input
-                          type="text"
-                          value={profileData.lastName}
-                          onChange={(e) => setProfileData({...profileData, lastName: e.target.value})}
-                          className="w-full px-4 py-3 bg-gray-50 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-white focus:border-transparent"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Email
-                        </label>
-                        <input
-                          type="email"
-                          value={user?.email || ''}
-                          className="w-full px-4 py-3 bg-gray-50 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-white focus:border-transparent opacity-50"
-                          disabled
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          University
-                        </label>
-                        <input
-                          type="text"
-                          value={profileData.university}
-                          onChange={(e) => setProfileData({...profileData, university: e.target.value})}
-                          className="w-full px-4 py-3 bg-gray-50 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-white focus:border-transparent"
-                          placeholder="University name..."
+                          ref={profileImageInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleProfileImageChange}
+                          className="hidden"
                         />
                       </div>
                     </div>
-                    
-                    {/* Success/Error Message */}
-                    {saveMessage && (
-                      <div className={`p-3 rounded-lg ${
-                        saveMessage.type === 'success' 
-                          ? 'bg-green-50 dark:bg-green-900/20 border border-green-500 text-green-600 dark:text-green-400' 
-                          : 'bg-red-50 dark:bg-red-900/20 border border-red-500 text-red-600 dark:text-red-400'
-                      }`}>
-                        {saveMessage.text}
-                      </div>
-                    )}
-                    
-                    <button 
-                      type="submit"
-                      disabled={isSaving}
-                      className="px-6 py-3 bg-gray-900 dark:bg-white text-white dark:text-black rounded-lg font-semibold hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isSaving ? 'Saving...' : 'Save Changes'}
-                    </button>
-                  </form>
-                </div>
-              </div>
 
-              {/* Notification Settings */}
-              <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Notifications</h2>
-                <div className="space-y-4">
-                  {[
-                    { label: 'Email notifications', description: 'Receive emails for new content and updates' },
-                    { label: 'Quiz notifications', description: 'Notify when new quiz is ready' },
-                    { label: 'Share notifications', description: 'Notify when your content is shared' },
-                    { label: 'Weekly summary', description: 'Send weekly learning summary' },
-                  ].map((item, index) => (
-                    <div key={index} className="flex items-center justify-between py-3 border-b border-gray-200 dark:border-zinc-800 last:border-0">
-                      <div>
-                        <p className="text-gray-900 dark:text-white font-medium">{item.label}</p>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">{item.description}</p>
+                    <form onSubmit={handleProfileUpdate} className="flex-1 space-y-5">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+                            First Name
+                          </label>
+                          <input
+                            type="text"
+                            value={profileData.firstName}
+                            onChange={(e) => setProfileData({ ...profileData, firstName: e.target.value })}
+                            className="w-full px-4 py-2.5 bg-gray-50 dark:bg-zinc-900/70 border border-gray-200 dark:border-zinc-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-zinc-500 focus:ring-2 focus:ring-purple-500/80 dark:focus:ring-purple-400 focus:border-transparent"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+                            Last Name
+                          </label>
+                          <input
+                            type="text"
+                            value={profileData.lastName}
+                            onChange={(e) => setProfileData({ ...profileData, lastName: e.target.value })}
+                            className="w-full px-4 py-2.5 bg-gray-50 dark:bg-zinc-900/70 border border-gray-200 dark:border-zinc-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-zinc-500 focus:ring-2 focus:ring-purple-500/80 dark:focus:ring-purple-400 focus:border-transparent"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+                            Email
+                          </label>
+                          <input
+                            type="email"
+                            value={user?.email || ''}
+                            className="w-full px-4 py-2.5 bg-gray-50 dark:bg-zinc-900/70 border border-gray-200 dark:border-zinc-800 rounded-xl text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500/40 dark:focus:ring-purple-400/40 focus:border-transparent opacity-60"
+                            disabled
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+                            University
+                          </label>
+                          <input
+                            type="text"
+                            value={profileData.university}
+                            onChange={(e) => setProfileData({ ...profileData, university: e.target.value })}
+                            className="w-full px-4 py-2.5 bg-gray-50 dark:bg-zinc-900/70 border border-gray-200 dark:border-zinc-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-zinc-500 focus:ring-2 focus:ring-purple-500/80 dark:focus:ring-purple-400 focus:border-transparent"
+                            placeholder="University name..."
+                          />
+                        </div>
                       </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" defaultChecked className="sr-only peer" />
-                        <div className="w-11 h-6 bg-gray-300 dark:bg-zinc-700 peer-focus:ring-2 peer-focus:ring-blue-500/50 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white dark:after:bg-zinc-400 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gradient-to-r peer-checked:from-blue-500 peer-checked:to-purple-500 peer-checked:after:bg-white"></div>
-                      </label>
-                    </div>
-                  ))}
-                </div>
-              </div>
 
-              {/* Privacy Settings */}
-              <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-6">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Privacy</h2>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between py-3 border-b border-gray-200 dark:border-zinc-800">
-                    <div>
-                      <p className="text-gray-900 dark:text-white font-medium">Make my profile public</p>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">Other users can see your profile</p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" defaultChecked className="sr-only peer" />
-                      <div className="w-11 h-6 bg-gray-300 dark:bg-zinc-700 peer-focus:ring-2 peer-focus:ring-blue-500/50 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white dark:after:bg-zinc-400 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gradient-to-r peer-checked:from-blue-500 peer-checked:to-purple-500 peer-checked:after:bg-white"></div>
-                    </label>
-                  </div>
-                  <div className="flex items-center justify-between py-3">
-                    <div>
-                      <p className="text-gray-900 dark:text-white font-medium">Default sharing setting</p>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">Default privacy for new PDFs</p>
-                    </div>
-                    <select className="px-4 py-2 bg-gray-50 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-white">
-                      <option value="private">Private</option>
-                      <option value="public">Public</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
+                      {/* Success/Error Message */}
+                      {saveMessage && (
+                        <div
+                          className={`p-3 rounded-xl text-sm ${
+                            saveMessage.type === 'success'
+                              ? 'bg-green-50 dark:bg-green-900/20 border border-green-500/70 text-green-700 dark:text-green-300'
+                              : 'bg-red-50 dark:bg-red-900/20 border border-red-500/70 text-red-700 dark:text-red-300'
+                          }`}
+                        >
+                          {saveMessage.text}
+                        </div>
+                      )}
 
-              {/* Danger Zone */}
-              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-6">
-                <h2 className="text-xl font-bold text-red-600 dark:text-red-400 mb-4">Danger Zone</h2>
-                <div className="space-y-3">
-                  <button className="w-full px-4 py-3 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-400 border border-red-300 dark:border-red-800 rounded-lg hover:bg-red-200 dark:hover:bg-red-900 transition-colors font-medium">
-                    Download All Data
-                  </button>
-                  <button className="w-full px-4 py-3 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-400 border border-red-300 dark:border-red-800 rounded-lg hover:bg-red-200 dark:hover:bg-red-900 transition-colors font-medium">
-                    Delete Account
-                  </button>
+                      <div className="flex justify-end">
+                        <button
+                          type="submit"
+                          disabled={isSaving}
+                          className="inline-flex items-center px-6 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-purple-500 to-blue-500 text-white shadow-md shadow-purple-500/30 hover:shadow-lg hover:shadow-purple-500/40 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {isSaving ? 'Saving...' : 'Save Changes'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
                 </div>
               </div>
             </div>

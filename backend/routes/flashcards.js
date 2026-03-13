@@ -1,15 +1,12 @@
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
-import { generateFlashcardsFromPDF as generateFlashcardsGroq } from '../utils/groq.js';
 import { generateFlashcardsFromPDF as generateFlashcardsGemini } from '../utils/gemini.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const generateFlashcardsFromPDF =
-  process.env.AI_PROVIDER === 'groq' && process.env.GROQ_API_KEY
-    ? generateFlashcardsGroq
-    : generateFlashcardsGemini;
+// Always use Gemini for flashcard generation (Groq temporarily disabled)
+const generateFlashcardsFromPDF = generateFlashcardsGemini;
 
 const router = express.Router();
 const supabase = createClient(

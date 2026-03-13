@@ -180,9 +180,9 @@ const QuizPage = () => {
   const score = showResults ? calculateScore() : null;
 
   return (
-    <div className="min-h-screen bg-gray-100 dark:bg-black text-gray-900 dark:text-white">
+    <div className="min-h-screen bg-gray-50 dark:bg-black text-gray-900 dark:text-white">
       {/* Header */}
-      <div className="bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800">
+      <div className="bg-white/80 dark:bg-zinc-900/95 border-b border-gray-200 dark:border-zinc-800 backdrop-blur">
         <div className="max-w-5xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <button
@@ -210,7 +210,7 @@ const QuizPage = () => {
       </div>
 
       {/* Content */}
-      <div className="max-w-5xl mx-auto px-6 py-12">
+      <div className="max-w-5xl mx-auto px-6 py-10">
         <AnimatePresence mode="wait">
           {!showResults ? (
             <motion.div
@@ -221,10 +221,25 @@ const QuizPage = () => {
             >
               {/* Quiz Info */}
               <div className="mb-8">
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{quiz.title}</h1>
-                <p className="text-gray-600 dark:text-gray-400">
-                  {quiz.pdf?.file_name} • {quiz.difficulty}
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-500 dark:text-purple-400 mb-1">
+                  Quiz
                 </p>
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-1">
+                  {quiz.title}
+                </h1>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-400 mt-1">
+                  {quiz.pdf?.file_name && (
+                    <span className="px-2 py-0.5 rounded-full bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-200">
+                      {quiz.pdf.file_name}
+                    </span>
+                  )}
+                  <span className="px-2 py-0.5 rounded-full bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-200 capitalize">
+                    {quiz.difficulty}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-200">
+                    {questions.length} questions
+                  </span>
+                </div>
               </div>
 
               {/* Progress Bar */}
@@ -248,7 +263,7 @@ const QuizPage = () => {
                 key={currentQuestionIndex}
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-8 mb-8"
+                className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-8 mb-8 shadow-sm dark:shadow-none"
               >
                 <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-6">
                   {currentQuestion.question_text}
@@ -261,8 +276,8 @@ const QuizPage = () => {
                       onClick={() => handleAnswer(currentQuestion.id, option)}
                       className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
                         userAnswers[currentQuestion.id] === option
-                          ? 'border-purple-500 bg-purple-500/10 dark:bg-purple-500/10'
-                          : 'border-gray-300 dark:border-zinc-700 hover:border-gray-400 dark:hover:border-zinc-600 bg-gray-50 dark:bg-zinc-800'
+                          ? 'border-purple-500 bg-purple-500/8 dark:bg-purple-500/10 shadow-sm'
+                          : 'border-gray-200 dark:border-zinc-700 hover:border-gray-400 dark:hover:border-zinc-600 bg-gray-50 dark:bg-zinc-800/80'
                       }`}
                     >
                       <div className="flex items-center space-x-3">

@@ -107,6 +107,7 @@ const MESSAGES = {
     quiz_study_cards_button: 'Study cards',
     quiz_new_button: 'New Quiz',
     quiz_modal_title: 'Create New Quiz',
+    quiz_attempt_chip_label: 'Attempt {index}',
 
     // Home stats
     home_welcome: 'Welcome, {name}! 👋',
@@ -122,6 +123,7 @@ const MESSAGES = {
     home_upload_title: 'Upload PDF',
     home_upload_subtitle: 'Drag & drop or click',
     home_upload_button: 'Choose File',
+    home_upload_hint: 'Max 50MB • PDF format only',
     home_recent_uploads: 'Recent Uploads',
 
     // Analytics – quiz performance
@@ -263,6 +265,7 @@ const MESSAGES = {
     quiz_study_cards_button: 'Kartlarla çalış',
     quiz_new_button: 'Yeni Quiz',
     quiz_modal_title: 'Yeni Quiz Oluştur',
+    quiz_attempt_chip_label: '{index}. deneme',
 
     // Home stats
     home_welcome: 'Hoş geldin, {name}! 👋',
@@ -278,6 +281,7 @@ const MESSAGES = {
     home_upload_title: 'PDF Yükle',
     home_upload_subtitle: 'Sürükleyip bırak veya tıkla',
     home_upload_button: 'Dosya Seç',
+    home_upload_hint: 'Maksimum 50MB • PDF formatı',
     home_recent_uploads: 'Son Yüklenenler',
 
     // Analytics – quiz performance

@@ -191,9 +191,9 @@ const FlashcardPage = ({ mode = 'quiz' }) => {
   const currentCard = cards[currentIndex];
 
   return (
-    <div className="min-h-screen bg-gray-100 dark:bg-black text-gray-900 dark:text-white flex flex-col">
+    <div className="min-h-screen bg-gray-50 dark:bg-black text-gray-900 dark:text-white flex flex-col">
       {/* Header */}
-      <header className="bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800 flex-shrink-0">
+      <header className="bg-white/80 dark:bg-zinc-900/95 border-b border-gray-200 dark:border-zinc-800 flex-shrink-0 backdrop-blur">
         <div className="max-w-3xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <button

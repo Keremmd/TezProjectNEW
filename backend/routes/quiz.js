@@ -1,16 +1,12 @@
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { generateQuizFromPDF as generateQuizFromPDFGemini } from '../utils/gemini.js';
-import { generateQuizFromPDF as generateQuizFromPDFGroq } from '../utils/groq.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Use Groq when AI_PROVIDER=groq and GROQ_API_KEY is set (avoids Gemini quota issues)
-const generateQuizFromPDF =
-  process.env.AI_PROVIDER === 'groq' && process.env.GROQ_API_KEY
-    ? generateQuizFromPDFGroq
-    : generateQuizFromPDFGemini;
+// Always use Gemini for quiz generation (Groq temporarily disabled)
+const generateQuizFromPDF = generateQuizFromPDFGemini;
 
 const router = express.Router();
 const supabase = createClient(
@@ -100,9 +96,8 @@ router.post('/generate', async (req, res) => {
 
     console.log(`📄 PDF text extracted: ${pdfText.length} characters`);
 
-    // Generate quiz questions using AI (Gemini or Groq per AI_PROVIDER)
-    const provider = process.env.AI_PROVIDER === 'groq' && process.env.GROQ_API_KEY ? 'Groq' : 'Gemini';
-    console.log(`🤖 Generating ${questionCount} ${difficulty} questions (${provider})...`);
+    // Generate quiz questions using AI (Gemini 2.5 Flash)
+    console.log(`🤖 Generating ${questionCount} ${difficulty} questions (Gemini)...`);
     let questions;
 
     try {
