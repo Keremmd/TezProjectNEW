@@ -120,9 +120,26 @@ Exactly ${questionCount} questions. The JSON MUST have ${questionCount} question
     if (!jsonResponse.questions || !Array.isArray(jsonResponse.questions)) {
       throw new Error('AI response missing questions array');
     }
-    
-    console.log(`✅ Successfully generated ${jsonResponse.questions.length} questions`);
-    return jsonResponse.questions;
+
+    let questions = jsonResponse.questions;
+
+    // Enforce exact question count: never more, never fewer
+    if (questions.length > questionCount) {
+      console.warn(
+        `⚠️ AI returned ${questions.length} questions, trimming to exactly ${questionCount}`,
+      );
+      questions = questions.slice(0, questionCount);
+    } else if (questions.length < questionCount) {
+      console.error(
+        `❌ AI returned only ${questions.length} questions (expected ${questionCount})`,
+      );
+      throw new Error(
+        `AI returned fewer questions than requested (${questions.length}/${questionCount})`,
+      );
+    }
+
+    console.log(`✅ Successfully generated exactly ${questions.length} questions`);
+    return questions;
   } catch (error) {
     console.error('❌ Error generating quiz:', error.message);
     throw new Error('Failed to generate quiz questions: ' + error.message);

@@ -2591,53 +2591,94 @@ const Dashboard = () => {
 
                       {/* Difficulty distribution mini chart */}
                       <div className="flex-1">
-                        <div className="flex items-end justify-end gap-4 h-24">
-                          {(() => {
-                            const toPct = (a) =>
-                              Number(a.percentage) ||
-                              (a.total_points
-                                ? Math.round((a.score / a.total_points) * 100)
-                                : 0);
-                            const levels = [
-                              { key: 'easy', label: 'Easy', color: 'from-emerald-400 to-emerald-500' },
-                              { key: 'medium', label: 'Medium', color: 'from-amber-400 to-amber-500' },
-                              { key: 'hard', label: 'Hard', color: 'from-rose-400 to-rose-500' },
-                            ];
+                        {(() => {
+                          const toPct = (a) =>
+                            Number(a.percentage) ||
+                            (a.total_points
+                              ? Math.round((a.score / a.total_points) * 100)
+                              : 0);
+                          const levels = [
+                            { key: 'easy', label: 'Easy', color: 'bg-emerald-500' },
+                            { key: 'medium', label: 'Medium', color: 'bg-amber-500' },
+                            { key: 'hard', label: 'Hard', color: 'bg-rose-500' },
+                          ];
 
-                            return levels.map((level) => {
-                              const attemptsForLevel = quizAttempts.filter(
-                                (a) => a.quiz?.difficulty === level.key,
-                              );
-                              const avgForLevel =
-                                attemptsForLevel.length > 0
-                                  ? Math.round(
-                                      attemptsForLevel.reduce(
-                                        (sum, a) => sum + toPct(a),
-                                        0,
-                                      ) / attemptsForLevel.length,
-                                    )
-                                  : 0;
-                              const barHeight = Math.max(8, (avgForLevel / 100) * 100);
+                          const counts = levels.map((level) => ({
+                            level,
+                            attempts: quizAttempts.filter(
+                              (a) => a.quiz?.difficulty === level.key,
+                            ),
+                          }));
 
-                              return (
-                                <div key={level.key} className="flex flex-col items-center gap-1 w-10">
-                                  <div className="flex-1 flex items-end w-full">
+                          const totalCount = counts.reduce(
+                            (sum, item) => sum + item.attempts.length,
+                            0,
+                          );
+
+                          if (totalCount === 0) {
+                            return null;
+                          }
+
+                          return (
+                            <>
+                              <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-2 text-right">
+                                Difficulty performance
+                              </p>
+                              <div className="h-3 rounded-full bg-zinc-800/80 overflow-hidden flex">
+                                {counts.map(({ level, attempts }) => {
+                                  const width =
+                                    totalCount === 0
+                                      ? 0
+                                      : (attempts.length / totalCount) * 100;
+                                  if (width === 0) return null;
+                                  const avg =
+                                    attempts.length > 0
+                                      ? Math.round(
+                                          attempts.reduce(
+                                            (sum, a) => sum + toPct(a),
+                                            0,
+                                          ) / attempts.length,
+                                        )
+                                      : 0;
+                                  return (
                                     <div
-                                      className={`w-full rounded-full bg-gradient-to-t ${level.color}`}
-                                      style={{ height: `${barHeight}%` }}
+                                      key={level.key}
+                                      className={`${level.color} relative`}
+                                      style={{ width: `${width}%` }}
+                                      title={`${level.label}: ${avg}% avg`}
                                     />
-                                  </div>
-                                  <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                                    {level.label}
-                                  </span>
-                                  <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                                    {avgForLevel}%
-                                  </span>
-                                </div>
-                              );
-                            });
-                          })()}
-                        </div>
+                                  );
+                                })}
+                              </div>
+                              <div className="mt-2 flex items-center justify-end gap-3">
+                                {counts.map(({ level, attempts }) => {
+                                  if (attempts.length === 0) return null;
+                                  const avg =
+                                    attempts.length > 0
+                                      ? Math.round(
+                                          attempts.reduce(
+                                            (sum, a) => sum + toPct(a),
+                                            0,
+                                          ) / attempts.length,
+                                        )
+                                      : 0;
+                                  return (
+                                    <div
+                                      key={level.key}
+                                      className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500"
+                                    >
+                                      <span
+                                        className={`${level.color} inline-block w-2 h-2 rounded-full`}
+                                      />
+                                      <span>{level.label}</span>
+                                      <span className="opacity-80">{avg}%</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
                   )}

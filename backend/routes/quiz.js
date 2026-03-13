@@ -137,7 +137,8 @@ router.post('/generate', async (req, res) => {
       pdf_id: pdfId,
       title,
       difficulty,
-      total_questions: questions.length,
+      // total_questions MUST match the requested questionCount (enforced in generator)
+      total_questions: questionCount,
       privacy
     };
 
