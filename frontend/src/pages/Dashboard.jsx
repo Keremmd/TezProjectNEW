@@ -2392,7 +2392,7 @@ const Dashboard = () => {
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex-1 min-w-0">
                         <div className="mb-2 max-w-full">
-                          <span className="inline-block text-base font-semibold text-gray-50 dark:text-white truncate">
+                          <span className="inline-block text-base font-semibold text-gray-900 dark:text-white truncate">
                             {course.title}
                           </span>
                         </div>
