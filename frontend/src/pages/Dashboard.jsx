@@ -742,7 +742,9 @@ const Dashboard = () => {
 
     const pdfs = selectedPdfIds
       .map((id) => ({ id, meta: pdfMap[id] }))
-      .filter((p) => p.meta);
+      .filter((p) => p.meta)
+      // Chapter1, Chapter2, ... gibi isimlere göre sırala
+      .sort((a, b) => (a.meta.file_name || '').localeCompare(b.meta.file_name || undefined, undefined, { numeric: true, sensitivity: 'base' }));
 
     if (!pdfs.length) return null;
 
@@ -5668,8 +5670,13 @@ const Dashboard = () => {
                     setExamPlanCourse(null);
                     setExamPlanDate('');
                     setExamPlanSelectedPdfs([]);
+                    setExamPlanSelectedQuizzes([]);
                   }}
-                  disabled={!examPlanDate || examPlanSelectedPdfs.length === 0}
+                  disabled={
+                    !examPlanDate ||
+                    (examPlanSelectedPdfs.length === 0 &&
+                      examPlanSelectedQuizzes.length === 0)
+                  }
                   className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Save plan
