@@ -74,6 +74,15 @@ const Dashboard = () => {
     description: '',
     selectedPDFs: []
   });
+  const [addCoursePdfsSelection, setAddCoursePdfsSelection] = useState([]);
+  const [addCourseQuizzesSelection, setAddCourseQuizzesSelection] = useState([]);
+  const [examPlanPreviewCourse, setExamPlanPreviewCourse] = useState(null);
+  const [courseStudyPlans, setCourseStudyPlans] = useState({}); // { [courseId]: plan }
+  const [examPlanModalOpen, setExamPlanModalOpen] = useState(false);
+  const [examPlanCourse, setExamPlanCourse] = useState(null);
+  const [examPlanDate, setExamPlanDate] = useState('');
+  const [examPlanSelectedPdfs, setExamPlanSelectedPdfs] = useState([]);
+  const [examPlanSelectedQuizzes, setExamPlanSelectedQuizzes] = useState([]);
   const [favoriteCourses, setFavoriteCourses] = useState([]);
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [deleteCourseModalOpen, setDeleteCourseModalOpen] = useState(false);
@@ -208,6 +217,11 @@ const Dashboard = () => {
             completed_at,
             order_index,
             pdfs (*)
+          ),
+          course_quizzes (
+            id,
+            quiz_id,
+            quizzes (*)
           )
         `)
         .eq('user_id', user.id)
@@ -215,7 +229,27 @@ const Dashboard = () => {
 
       if (error) throw error;
 
-      setCourses(data || []);
+      const loadedCourses = data || [];
+      setCourses(loadedCourses);
+
+      // Load any stored study plans for these courses from localStorage
+      if (typeof window !== 'undefined') {
+        setCourseStudyPlans((prev) => {
+          const next = { ...prev };
+          for (const course of loadedCourses) {
+            const key = `studyplan_${user.id}_${course.id}`;
+            try {
+              const raw = window.localStorage.getItem(key);
+              if (raw) {
+                next[course.id] = JSON.parse(raw);
+              }
+            } catch {
+              // ignore parse/storage errors
+            }
+          }
+          return next;
+        });
+      }
     } catch (error) {
       console.error('Error loading courses:', error);
     }
@@ -648,6 +682,111 @@ const Dashboard = () => {
     } catch (error) {
       console.error('Error loading quiz analytics:', error);
     }
+  };
+
+  // Parse exam date from user input (supports "YYYY-MM-DD" and "DD.MM.YYYY")
+  const parseExamDateString = (value) => {
+    if (!value) return null;
+    let d = null;
+
+    // ISO format: 2026-03-17
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      d = new Date(value);
+    }
+    // Turkish style: 17.03.2026
+    else if (/^\d{2}\.\d{2}\.\d{4}$/.test(value)) {
+      const [day, month, year] = value.split('.');
+      d = new Date(Number(year), Number(month) - 1, Number(day));
+    }
+
+    if (!d || Number.isNaN(d.getTime())) return null;
+    return d;
+  };
+
+  // Build a simple study schedule from today until exam date
+  const buildCourseStudyPlan = (
+    course,
+    examDateStr,
+    selectedPdfIds,
+    courseQuizzes = [],
+    selectedQuizIds = [],
+  ) => {
+    if (!course || !examDateStr || !selectedPdfIds.length) return null;
+
+    const examDate = parseExamDateString(examDateStr);
+    if (!examDate) return null;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    let daysCount =
+      Math.round((examDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    if (daysCount < 1) daysCount = 1;
+
+    const days = [];
+    for (let i = 0; i < daysCount; i += 1) {
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+      days.push({
+        date: d.toISOString().slice(0, 10),
+        items: []
+      });
+    }
+
+    const pdfMap = {};
+    (course.course_pdfs || []).forEach((cp) => {
+      if (cp.pdf_id && cp.pdfs) {
+        pdfMap[cp.pdf_id] = cp.pdfs;
+      }
+    });
+
+    const pdfs = selectedPdfIds
+      .map((id) => ({ id, meta: pdfMap[id] }))
+      .filter((p) => p.meta);
+
+    if (!pdfs.length) return null;
+
+    // Spread PDFs across the full period until the exam
+    pdfs.forEach((pdf, index) => {
+      // Evenly distribute indexes over [0, days.length - 1]
+      const rawPos = ((index + 0.5) * days.length) / pdfs.length;
+      const dayIndex = Math.min(
+        days.length - 1,
+        Math.max(0, Math.round(rawPos) - 1)
+      );
+
+      days[dayIndex].items.push({
+        type: 'pdf',
+        pdfId: pdf.id,
+        title: pdf.meta.file_name
+      });
+    });
+
+    // Also distribute related quizzes (if any) across the period
+    const quizzesForPlan = (courseQuizzes || [])
+      .map((row) => row.quizzes)
+      .filter(Boolean)
+      .filter((quiz) => !selectedQuizIds || selectedQuizIds.includes(quiz.id));
+
+    quizzesForPlan.forEach((quiz, index) => {
+      const rawPos = ((index + 0.5) * days.length) / quizzesForPlan.length;
+      const dayIndex = Math.min(
+        days.length - 1,
+        Math.max(0, Math.round(rawPos) - 1)
+      );
+
+      days[dayIndex].items.push({
+        type: 'quiz',
+        quizId: quiz.id,
+        title: `Quiz: ${quiz.title}`
+      });
+    });
+
+    return {
+      examDate: examDate.toISOString().slice(0, 10),
+      createdAt: new Date().toISOString(),
+      days
+    };
   };
 
   // Load PDF-based flashcard decks
@@ -1185,6 +1324,125 @@ const Dashboard = () => {
   const handleDelete = (pdf) => {
     setPdfToDelete(pdf);
     setDeleteModalOpen(true);
+  };
+
+  // Add PDFs to an existing course
+  const handleAddPdfsToCourse = async () => {
+    if (!selectedCourse || !user) return;
+    if (!addCoursePdfsSelection.length) return;
+
+    try {
+      const baseIndex = selectedCourse.course_pdfs?.length || 0;
+      const rows = addCoursePdfsSelection.map((pdfId, idx) => ({
+        course_id: selectedCourse.id,
+        pdf_id: pdfId,
+        order_index: baseIndex + idx
+      }));
+
+      const { error } = await supabase.from('course_pdfs').insert(rows);
+      if (error) throw error;
+
+      // Update total_pdfs and progress on the course
+      const newTotalPdfs =
+        (selectedCourse.total_pdfs || selectedCourse.course_pdfs?.length || 0) +
+        addCoursePdfsSelection.length;
+
+      const { error: updateCourseError } = await supabase
+        .from('courses')
+        .update({ total_pdfs: newTotalPdfs })
+        .eq('id', selectedCourse.id);
+
+      if (updateCourseError) throw updateCourseError;
+
+      await updateCourseProgress(selectedCourse.id);
+
+      // Reload courses list and fresh course data
+      await loadUserCourses();
+
+      const { data: freshCourse, error: freshError } = await supabase
+        .from('courses')
+        .select(`
+          *,
+          course_pdfs (
+            id,
+            pdf_id,
+            completed,
+            completed_at,
+            order_index,
+            pdfs (*)
+          )
+        `)
+        .eq('id', selectedCourse.id)
+        .single();
+
+      if (!freshError && freshCourse) {
+        setSelectedCourse(freshCourse);
+      }
+
+      setAddCoursePdfsSelection([]);
+    } catch (error) {
+      console.error('Error adding PDFs to course:', error);
+      alert('Failed to add PDFs to course: ' + (error.message || 'Unknown error'));
+    }
+  };
+
+  // Add quizzes to an existing course
+  const handleAddQuizzesToCourse = async () => {
+    if (!selectedCourse || !user) return;
+    if (!addCourseQuizzesSelection.length) return;
+
+    try {
+      const rows = addCourseQuizzesSelection.map((quizId) => ({
+        course_id: selectedCourse.id,
+        quiz_id: quizId
+      }));
+
+      const { error } = await supabase.from('course_quizzes').insert(rows);
+      if (error) throw error;
+
+      const newTotalQuizzes =
+        (selectedCourse.total_quizzes || selectedCourse.course_quizzes?.length || 0) +
+        addCourseQuizzesSelection.length;
+
+      const { error: updateCourseError } = await supabase
+        .from('courses')
+        .update({ total_quizzes: newTotalQuizzes })
+        .eq('id', selectedCourse.id);
+
+      if (updateCourseError) throw updateCourseError;
+
+      await loadUserCourses();
+
+      const { data: freshCourse, error: freshError } = await supabase
+        .from('courses')
+        .select(`
+          *,
+          course_pdfs (
+            id,
+            pdf_id,
+            completed,
+            completed_at,
+            order_index,
+            pdfs (*)
+          ),
+          course_quizzes (
+            id,
+            quiz_id,
+            quizzes (*)
+          )
+        `)
+        .eq('id', selectedCourse.id)
+        .single();
+
+      if (!freshError && freshCourse) {
+        setSelectedCourse(freshCourse);
+      }
+
+      setAddCourseQuizzesSelection([]);
+    } catch (error) {
+      console.error('Error adding quizzes to course:', error);
+      alert('Failed to add quizzes to course: ' + (error.message || 'Unknown error'));
+    }
   };
 
   // Toggle PDF completion in course
@@ -2382,7 +2640,9 @@ const Dashboard = () => {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {courses.length > 0 ? courses.map((course) => (
+                {courses.length > 0 ? courses.map((course) => {
+                  const studyPlan = courseStudyPlans[course.id];
+                  return (
                   <motion.div
                     key={course.id}
                     whileHover={{ y: -6, scale: 1.01 }}
@@ -2444,20 +2704,80 @@ const Dashboard = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between pt-3 border-t border-gray-200 dark:border-zinc-800">
-                      <span className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center space-x-1">
-                        <Clock className="w-3 h-3" />
-                        <span>{new Date(course.created_at).toLocaleDateString()}</span>
-                      </span>
-                      <button
-                        onClick={() => setSelectedCourse(course)}
-                        className="px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-xs font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
-                      >
-                        {t('courses_continue_button')}
-                      </button>
+                    <div className="flex flex-col gap-2 pt-3 border-t border-gray-200 dark:border-zinc-800">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center space-x-1">
+                          <Clock className="w-3 h-3" />
+                          <span>{new Date(course.created_at).toLocaleDateString()}</span>
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {studyPlan && (
+                            <button
+                              type="button"
+                              onClick={() => setExamPlanPreviewCourse(course)}
+                              className="px-2 py-1 rounded-full bg-purple-500/10 text-[11px] text-purple-500 dark:text-purple-300 border border-purple-500/40 hover:bg-purple-500/20 transition-colors"
+                            >
+                              Exam:{' '}
+                              {new Date(studyPlan.examDate).toLocaleDateString(
+                                language === 'tr' ? 'tr-TR' : 'en-US',
+                              )}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setSelectedCourse(course)}
+                            className="px-4 py-2 bg-gray-100 dark:bg-white text-gray-900 dark:text-black text-xs font-medium rounded-lg border-2 border-gray-300 dark:border-transparent hover:bg-gray-200 dark:hover:bg-gray-100 transition-colors"
+                          >
+                            {t('courses_continue_button')}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={() => {
+                            const existingPlan = courseStudyPlans[course.id];
+                            setExamPlanCourse(course);
+                            if (existingPlan) {
+                              setExamPlanDate(existingPlan.examDate);
+                              const pdfIds = Array.from(
+                                new Set(
+                                  existingPlan.days.flatMap((d) =>
+                                    d.items.map((it) => it.pdfId),
+                                  ),
+                                ),
+                              );
+                              setExamPlanSelectedPdfs(pdfIds);
+                              const quizIds = Array.from(
+                                new Set(
+                                  existingPlan.days.flatMap((d) =>
+                                    d.items
+                                      .filter((it) => it.type === 'quiz' && it.quizId)
+                                      .map((it) => it.quizId),
+                                  ),
+                                ),
+                              );
+                              setExamPlanSelectedQuizzes(quizIds);
+                            } else {
+                              const todayISO = new Date().toISOString().slice(0, 10);
+                              setExamPlanDate(todayISO);
+                              const allCoursePdfIds = (course.course_pdfs || []).map(
+                                (cp) => cp.pdf_id,
+                              );
+                              setExamPlanSelectedPdfs(allCoursePdfIds);
+                              const allCourseQuizIds = (course.course_quizzes || []).map(
+                                (cq) => cq.quiz_id,
+                              );
+                              setExamPlanSelectedQuizzes(allCourseQuizIds);
+                            }
+                            setExamPlanModalOpen(true);
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-[11px] font-medium bg-zinc-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-200 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                        >
+                          {studyPlan ? 'Edit exam plan' : 'Plan for exam'}
+                        </button>
+                      </div>
                     </div>
                   </motion.div>
-                )) : (
+                )}) : (
                   <div className="col-span-2 text-center py-16">
                     <BookOpen className="w-20 h-20 text-gray-400 mx-auto mb-4" />
                     <p className="text-gray-600 dark:text-gray-400 text-xl mb-2">
@@ -4092,11 +4412,19 @@ const Dashboard = () => {
 
       {/* Course Details Modal */}
       {selectedCourse && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+        <div
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto"
+          onClick={() => {
+            setSelectedCourse(null);
+            setAddCoursePdfsSelection([]);
+            setAddCourseQuizzesSelection([]);
+          }}
+        >
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             className="bg-zinc-900 border-2 border-zinc-800 rounded-2xl p-8 max-w-4xl w-full my-8"
+            onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-6">
               <div>
@@ -4114,7 +4442,10 @@ const Dashboard = () => {
                   <Trash2 className="w-5 h-5" />
                 </button>
                 <button
-                  onClick={() => setSelectedCourse(null)}
+                  onClick={() => {
+                    setSelectedCourse(null);
+                    setAddCoursePdfsSelection([]);
+                  }}
                   className="p-2 text-gray-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
                 >
                   <X className="w-5 h-5" />
@@ -4206,6 +4537,194 @@ const Dashboard = () => {
                     <p className="text-gray-400">No PDFs in this course</p>
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Related Quizzes */}
+            <div className="mt-8">
+              <h3 className="text-lg font-bold text-white mb-3">Course quizzes</h3>
+              <div className="space-y-3 max-h-72 overflow-y-auto">
+                {(() => {
+                  const related = selectedCourse.course_quizzes || [];
+                  if (!related.length) {
+                    return (
+                      <p className="text-sm text-gray-500">
+                        No quizzes in this course yet.
+                      </p>
+                    );
+                  }
+                  return related
+                    .map((row) => row.quizzes)
+                    .filter(Boolean)
+                    .map((quiz) => (
+                      <div
+                        key={quiz.id}
+                        className="flex items-center justify-between bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3"
+                      >
+                        <div className="flex items-center min-w-0">
+                          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center mr-3 flex-shrink-0">
+                            <Brain className="w-4 h-4 text-white" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-white font-medium truncate">
+                              {quiz.title}
+                            </p>
+                            <p className="text-[11px] text-gray-400">
+                              {quiz.total_questions} questions • {quiz.difficulty}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => navigate(`/quiz/${quiz.id}`)}
+                          className="px-4 py-2 bg-white text-black text-xs font-medium rounded-lg hover:bg-gray-100 transition-colors"
+                        >
+                          Start
+                        </button>
+                      </div>
+                    ));
+                })()}
+              </div>
+            </div>
+
+            {/* Add more quizzes to course */}
+            <div className="mt-8">
+              <h3 className="text-lg font-bold text-white mb-3">Add quizzes from My Quizzes</h3>
+              <p className="text-sm text-gray-400 mb-3">
+                Select additional quizzes to include in this course. Existing ones are hidden.
+              </p>
+              <div className="max-h-72 overflow-y-auto space-y-2 bg-zinc-800/50 rounded-xl p-4 border border-zinc-700">
+                {(() => {
+                  const existingQuizIds = new Set(
+                    (selectedCourse.course_quizzes || []).map((cq) => cq.quiz_id),
+                  );
+                  const availableQuizzes = quizzes.filter(
+                    (quiz) => !existingQuizIds.has(quiz.id),
+                  );
+
+                  if (!availableQuizzes.length) {
+                    return (
+                      <p className="text-sm text-gray-500 text-center">
+                        All of your quizzes are already in this course.
+                      </p>
+                    );
+                  }
+
+                  return availableQuizzes.map((quiz) => (
+                    <label
+                      key={quiz.id}
+                      className="flex items-center space-x-3 p-3 bg-zinc-800 hover:bg-zinc-750 rounded-lg cursor-pointer transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={addCourseQuizzesSelection.includes(quiz.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setAddCourseQuizzesSelection((prev) => [...prev, quiz.id]);
+                          } else {
+                            setAddCourseQuizzesSelection((prev) =>
+                              prev.filter((id) => id !== quiz.id),
+                            );
+                          }
+                        }}
+                        className="w-5 h-5 rounded bg-zinc-700 border-zinc-600 text-purple-500 focus:ring-purple-500"
+                      />
+                      <div className="flex-1">
+                        <p className="text-white font-medium text-sm truncate">
+                          {quiz.title}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {quiz.total_questions} questions • {quiz.difficulty}
+                        </p>
+                      </div>
+                    </label>
+                  ));
+                })()}
+              </div>
+
+              <div className="flex justify-end gap-2 mt-4">
+                <button
+                  onClick={() => setAddCourseQuizzesSelection([])}
+                  className="px-4 py-2 bg-zinc-800 text-white text-xs font-medium rounded-lg hover:bg-zinc-700 transition-colors"
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={handleAddQuizzesToCourse}
+                  disabled={!addCourseQuizzesSelection.length}
+                  className="px-4 py-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white text-xs font-medium rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Add selected quizzes
+                </button>
+              </div>
+            </div>
+
+            {/* Add more PDFs to course */}
+            <div className="mt-8">
+              <h3 className="text-lg font-bold text-white mb-3">Add PDFs from My PDFs</h3>
+              <p className="text-sm text-gray-400 mb-3">
+                Select additional PDFs to include in this course. Existing ones are hidden.
+              </p>
+              <div className="max-h-72 overflow-y-auto space-y-2 bg-zinc-800/50 rounded-xl p-4 border border-zinc-700">
+                {(() => {
+                  const existingIds = new Set(
+                    (selectedCourse.course_pdfs || []).map((cp) => cp.pdf_id),
+                  );
+                  const available = userPDFs.filter((pdf) => !existingIds.has(pdf.id));
+
+                  if (!available.length) {
+                    return (
+                      <p className="text-sm text-gray-500 text-center">
+                        All of your PDFs are already in this course.
+                      </p>
+                    );
+                  }
+
+                  return available.map((pdf) => (
+                    <label
+                      key={pdf.id}
+                      className="flex items-center space-x-3 p-3 bg-zinc-800 hover:bg-zinc-750 rounded-lg cursor-pointer transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={addCoursePdfsSelection.includes(pdf.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setAddCoursePdfsSelection((prev) => [...prev, pdf.id]);
+                          } else {
+                            setAddCoursePdfsSelection((prev) =>
+                              prev.filter((id) => id !== pdf.id),
+                            );
+                          }
+                        }}
+                        className="w-5 h-5 rounded bg-zinc-700 border-zinc-600 text-blue-500 focus:ring-blue-500"
+                      />
+                      <div className="flex-1">
+                        <p className="text-white font-medium text-sm truncate">
+                          {pdf.file_name}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {pdf.university} • {pdf.course_name}
+                        </p>
+                      </div>
+                    </label>
+                  ));
+                })()}
+              </div>
+
+              <div className="flex justify-end gap-2 mt-4">
+                <button
+                  onClick={() => setAddCoursePdfsSelection([])}
+                  className="px-4 py-2 bg-zinc-800 text-white text-xs font-medium rounded-lg hover:bg-zinc-700 transition-colors"
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={handleAddPdfsToCourse}
+                  disabled={!addCoursePdfsSelection.length}
+                  className="px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-white text-xs font-medium rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Add selected PDFs
+                </button>
               </div>
             </div>
           </motion.div>
@@ -4954,6 +5473,294 @@ const Dashboard = () => {
           )}
           <p className="font-semibold text-white">{successMessage.text}</p>
         </motion.div>
+      )}
+
+      {/* Exam Plan Modal */}
+      {examPlanModalOpen && examPlanCourse && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border-2 border-zinc-800 rounded-2xl p-8 max-w-3xl w-full my-8"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-white">
+                  Exam study plan
+                </h2>
+                <p className="text-sm text-gray-400">
+                  Automatically spread your PDFs over the days until the exam.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setExamPlanModalOpen(false);
+                  setExamPlanCourse(null);
+                  setExamPlanDate('');
+                  setExamPlanSelectedPdfs([]);
+                }}
+                className="p-2 text-gray-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Exam date */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Exam date
+                  </label>
+                  <input
+                    type="text"
+                    value={examPlanDate}
+                    onChange={(e) => setExamPlanDate(e.target.value)}
+                    placeholder={language === 'tr' ? 'GG.AA.YYYY' : 'DD.MM.YYYY'}
+                    className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/60 transition-colors text-sm"
+                  />
+                  <p className="mt-1 text-[11px] text-gray-500">
+                    {language === 'tr'
+                      ? 'Tarih formatı: GG.AA.YYYY (ör. 17.03.2026).'
+                      : 'Date format: DD.MM.YYYY (e.g., 17.03.2026).'}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Course
+                  </label>
+                  <div className="px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white text-sm">
+                    {examPlanCourse.title}
+                  </div>
+                </div>
+              </div>
+
+              {/* PDFs selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-3">
+                  PDFs to include ({examPlanSelectedPdfs.length} selected)
+                </label>
+                <div className="max-h-56 overflow-y-auto space-y-2 bg-zinc-800/50 rounded-xl p-4 border border-zinc-700">
+                  {(examPlanCourse.course_pdfs || []).length > 0 ? (
+                    examPlanCourse.course_pdfs.map((cp) => (
+                      <label
+                        key={cp.id}
+                        className="flex items-center space-x-3 p-3 bg-zinc-800 hover:bg-zinc-750 rounded-lg cursor-pointer transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={examPlanSelectedPdfs.includes(cp.pdf_id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setExamPlanSelectedPdfs((prev) => [...prev, cp.pdf_id]);
+                            } else {
+                              setExamPlanSelectedPdfs((prev) =>
+                                prev.filter((id) => id !== cp.pdf_id),
+                              );
+                            }
+                          }}
+                          className="w-5 h-5 rounded bg-zinc-700 border-zinc-600 text-blue-500 focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <p className="text-white font-medium text-sm">
+                            {cp.pdfs?.file_name || 'PDF'}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            {cp.pdfs?.course_name} • {cp.pdfs?.university}
+                          </p>
+                        </div>
+                      </label>
+                    ))
+                  ) : (
+                    <div className="text-center py-8 text-gray-400 text-sm">
+                      This course has no PDFs yet.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Quizzes selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-3">
+                  Quizzes to include ({examPlanSelectedQuizzes.length} selected)
+                </label>
+                <div className="max-h-40 overflow-y-auto space-y-2 bg-zinc-800/50 rounded-xl p-4 border border-zinc-700">
+                  {(examPlanCourse.course_quizzes || []).length > 0 ? (
+                    examPlanCourse.course_quizzes.map((cq) => {
+                      const quiz = cq.quizzes;
+                      if (!quiz) return null;
+                      return (
+                        <label
+                          key={cq.id}
+                          className="flex items-center space-x-3 p-3 bg-zinc-800 hover:bg-zinc-750 rounded-lg cursor-pointer transition-colors"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={examPlanSelectedQuizzes.includes(quiz.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setExamPlanSelectedQuizzes((prev) => [...prev, quiz.id]);
+                              } else {
+                                setExamPlanSelectedQuizzes((prev) =>
+                                  prev.filter((id) => id !== quiz.id),
+                                );
+                              }
+                            }}
+                            className="w-5 h-5 rounded bg-zinc-700 border-zinc-600 text-purple-500 focus:ring-purple-500"
+                          />
+                          <div className="flex-1">
+                            <p className="text-white font-medium text-sm">
+                              {quiz.title}
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              {quiz.total_questions} questions • {quiz.difficulty}
+                            </p>
+                          </div>
+                        </label>
+                      );
+                    })
+                  ) : (
+                    <div className="text-center py-6 text-gray-400 text-sm">
+                      No quizzes linked to this course yet.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={() => {
+                    setExamPlanModalOpen(false);
+                    setExamPlanCourse(null);
+                    setExamPlanDate('');
+                    setExamPlanSelectedPdfs([]);
+                    setExamPlanSelectedQuizzes([]);
+                  }}
+                  className="flex-1 px-6 py-3 bg-zinc-800 text-white rounded-xl font-semibold hover:bg-zinc-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    const plan = buildCourseStudyPlan(
+                      examPlanCourse,
+                      examPlanDate,
+                      examPlanSelectedPdfs,
+                      examPlanCourse.course_quizzes || [],
+                      examPlanSelectedQuizzes,
+                    );
+                    if (!plan || typeof window === 'undefined' || !user) return;
+
+                    try {
+                      const key = `studyplan_${user.id}_${examPlanCourse.id}`;
+                      window.localStorage.setItem(key, JSON.stringify(plan));
+                    } catch {
+                      // ignore storage errors
+                    }
+
+                    setCourseStudyPlans((prev) => ({
+                      ...prev,
+                      [examPlanCourse.id]: plan
+                    }));
+
+                    setExamPlanModalOpen(false);
+                    setExamPlanCourse(null);
+                    setExamPlanDate('');
+                    setExamPlanSelectedPdfs([]);
+                  }}
+                  disabled={!examPlanDate || examPlanSelectedPdfs.length === 0}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Save plan
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Exam Plan Preview Modal (opened from Exam badge) */}
+      {examPlanPreviewCourse && courseStudyPlans[examPlanPreviewCourse.id] && (
+        <div
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto"
+          onClick={() => setExamPlanPreviewCourse(null)}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-zinc-900 border-2 border-zinc-800 rounded-2xl p-6 md:p-8 max-w-3xl w-full my-8"
+          >
+            {(() => {
+              const plan = courseStudyPlans[examPlanPreviewCourse.id];
+              if (!plan) return null;
+              return (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h2 className="text-xl md:text-2xl font-bold text-white">
+                        {examPlanPreviewCourse.title}
+                      </h2>
+                      <p className="text-sm text-gray-400">
+                        Exam:{' '}
+                        {new Date(plan.examDate).toLocaleDateString(
+                          language === 'tr' ? 'tr-TR' : 'en-US',
+                        )}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setExamPlanPreviewCourse(null)}
+                      className="p-2 text-gray-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <div className="bg-zinc-800/60 border border-zinc-700 rounded-xl p-4 max-h-96 overflow-y-auto text-sm">
+                    <div className="space-y-3">
+                      {plan.days.map((day) => (
+                        <div
+                          key={day.date}
+                          className="flex items-start justify-between gap-3 border-b border-zinc-700/60 pb-2 last:border-b-0 last:pb-0"
+                        >
+                          <div className="w-28 text-xs text-gray-400">
+                            {new Date(day.date).toLocaleDateString(
+                              language === 'tr' ? 'tr-TR' : 'en-US',
+                              { weekday: 'short', month: 'short', day: 'numeric' },
+                            )}
+                          </div>
+                          <div className="flex-1 text-gray-200">
+                            {day.items.length > 0 ? (
+                              <ul className="list-disc list-inside space-y-1">
+                                {day.items.map((item) => (
+                                  <li
+                                    key={`${item.type}-${item.pdfId || item.quizId}`}
+                                    className={
+                                      item.type === 'quiz'
+                                        ? 'text-purple-300'
+                                        : undefined
+                                    }
+                                  >
+                                    {item.title}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <span className="text-xs text-gray-500">
+                                Rest or review day
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </motion.div>
+        </div>
       )}
 
       {/* Mobile Sidebar Overlay */}
