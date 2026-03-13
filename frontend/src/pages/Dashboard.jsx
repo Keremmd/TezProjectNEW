@@ -639,7 +639,7 @@ const Dashboard = () => {
     try {
       const { data, error } = await supabase
         .from('quiz_attempts')
-        .select('id, quiz_id, score, total_points, percentage, created_at, quiz:quizzes(title)')
+        .select('id, quiz_id, score, total_points, percentage, created_at, quiz:quizzes(title, difficulty)')
         .eq('user_id', user.id)
         .order('created_at', { ascending: true });
 
@@ -2497,6 +2497,151 @@ const Dashboard = () => {
                   <Plus className="w-5 h-5" />
                   <span>{t('quiz_new_button')}</span>
                 </button>
+              </div>
+
+              {/* Global quiz analytics panel */}
+              <div className="relative overflow-hidden bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-5 md:p-6 shadow-sm dark:shadow-none">
+                <div className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-gradient-to-br from-purple-500/20 via-blue-500/10 to-transparent blur-3xl" />
+                <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
+                      {t('analytics_title')}
+                    </h2>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 max-w-md">
+                      {t('analytics_subtitle')}
+                    </p>
+                  </div>
+
+                  {quizAttempts.length === 0 ? (
+                    <div className="flex-1 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                      <div className="text-sm text-gray-600 dark:text-gray-400">
+                        <p className="font-medium text-gray-800 dark:text-gray-200">
+                          {t('analytics_no_attempts_title')}
+                        </p>
+                        <p className="text-xs mt-1">
+                          {t('analytics_no_attempts_subtitle')}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                      <div className="flex-1 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+                      {/* Summary chips */}
+                      <div className="flex flex-wrap gap-3">
+                        {(() => {
+                          const totalAttempts = quizAttempts.length;
+                          const toPct = (a) =>
+                            Number(a.percentage) ||
+                            (a.total_points
+                              ? Math.round((a.score / a.total_points) * 100)
+                              : 0);
+                          const bestAttempt = quizAttempts.reduce((best, curr) =>
+                            !best || toPct(curr) > toPct(best) ? curr : best,
+                          null);
+                          const lastAttempt = quizAttempts[quizAttempts.length - 1];
+                          const bestPct = bestAttempt ? toPct(bestAttempt) : 0;
+                          const lastPct = lastAttempt ? toPct(lastAttempt) : 0;
+                          const avgPct =
+                            totalAttempts > 0
+                              ? Math.round(
+                                  quizAttempts.reduce((sum, a) => sum + toPct(a), 0) /
+                                    totalAttempts,
+                                )
+                              : 0;
+
+                          return (
+                            <>
+                              <div className="px-3 py-2 rounded-xl bg-purple-500/10 border border-purple-500/40 text-xs text-purple-500 dark:text-purple-300">
+                                <p className="font-semibold mb-0.5">
+                                  {t('analytics_best_score_label')}
+                                </p>
+                                <p className="text-[11px]">
+                                  {bestPct}% ({bestAttempt.score}/{bestAttempt.total_points})
+                                </p>
+                              </div>
+                              <div className="px-3 py-2 rounded-xl bg-indigo-500/10 border border-indigo-500/40 text-xs text-indigo-600 dark:text-indigo-300">
+                                <p className="font-semibold mb-0.5">
+                                  Avg score
+                                </p>
+                                <p className="text-[11px]">
+                                  {avgPct}%
+                                </p>
+                              </div>
+                              <div className="px-3 py-2 rounded-xl bg-blue-500/10 border border-blue-500/40 text-xs text-blue-600 dark:text-blue-300">
+                                <p className="font-semibold mb-0.5">
+                                  {t('analytics_attempts_label', { count: totalAttempts })}
+                                </p>
+                                <p className="text-[11px]">
+                                  {new Date(lastAttempt.created_at).toLocaleDateString(
+                                    language === 'tr' ? 'tr-TR' : 'en-US',
+                                  )}
+                                </p>
+                              </div>
+                              <div className="px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300">
+                                <p className="font-semibold mb-0.5">
+                                  {t('analytics_last_attempt_label')}
+                                </p>
+                                <p className="text-[11px]">
+                                  {lastPct}% ({lastAttempt.score}/{lastAttempt.total_points})
+                                </p>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+
+                      {/* Difficulty distribution mini chart */}
+                      <div className="flex-1">
+                        <div className="flex items-end justify-end gap-4 h-24">
+                          {(() => {
+                            const toPct = (a) =>
+                              Number(a.percentage) ||
+                              (a.total_points
+                                ? Math.round((a.score / a.total_points) * 100)
+                                : 0);
+                            const levels = [
+                              { key: 'easy', label: 'Easy', color: 'from-emerald-400 to-emerald-500' },
+                              { key: 'medium', label: 'Medium', color: 'from-amber-400 to-amber-500' },
+                              { key: 'hard', label: 'Hard', color: 'from-rose-400 to-rose-500' },
+                            ];
+
+                            return levels.map((level) => {
+                              const attemptsForLevel = quizAttempts.filter(
+                                (a) => a.quiz?.difficulty === level.key,
+                              );
+                              const avgForLevel =
+                                attemptsForLevel.length > 0
+                                  ? Math.round(
+                                      attemptsForLevel.reduce(
+                                        (sum, a) => sum + toPct(a),
+                                        0,
+                                      ) / attemptsForLevel.length,
+                                    )
+                                  : 0;
+                              const barHeight = Math.max(8, (avgForLevel / 100) * 100);
+
+                              return (
+                                <div key={level.key} className="flex flex-col items-center gap-1 w-10">
+                                  <div className="flex-1 flex items-end w-full">
+                                    <div
+                                      className={`w-full rounded-full bg-gradient-to-t ${level.color}`}
+                                      style={{ height: `${barHeight}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                                    {level.label}
+                                  </span>
+                                  <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                                    {avgForLevel}%
+                                  </span>
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="space-y-4">
