@@ -405,19 +405,19 @@ function LandingPageNew() {
                           <svg className="w-5 h-5 text-purple-500" fill="currentColor" viewBox="0 0 20 20">
                             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                           </svg>
-                          <span>AI destekli sınav modülü ile gerçek sınav atmosferi</span>
+                          <span>AI-powered exam experience</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <svg className="w-5 h-5 text-purple-500" fill="currentColor" viewBox="0 0 20 20">
                             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                           </svg>
-                          <span>PDF’den tek tıkla quiz ve flashcard üretimi</span>
+                          <span>One-click quizzes & flashcards</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <svg className="w-5 h-5 text-purple-500" fill="currentColor" viewBox="0 0 20 20">
                             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                           </svg>
-                          <span>Çok dilli, modern ve karanlık/aydınlık temaya uyumlu arayüz</span>
+                          <span>Modern, multilingual study workspace</span>
                         </div>
                       </div>
                     </div>
@@ -1046,7 +1046,7 @@ function LandingPageNew() {
               )}
             </div>
             <p className="text-sm text-gray-500 mt-6">
-              Gerçek sınav senaryoları, AI destekli analizler ve çalışma düzenini tamamen sana göre tasarlayan akıllı bir öğrenme alanı.
+              Built for students who want smarter, faster studying.
             </p>
           </div>
         </section>
