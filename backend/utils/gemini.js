@@ -302,3 +302,88 @@ Exactly ${cardCount} cards. Return ONLY the JSON object.`;
     throw new Error('Failed to generate flashcards: ' + error.message);
   }
 }
+
+/**
+ * Extract important glossary terms from a PDF.
+ * @param {string} pdfText - Extracted text from PDF
+ * @param {Object} options - { language }
+ * @returns {Promise<Array<{ term: string, definition: string, category?: string, importance?: "high"|"medium"|"low" }>>}
+ */
+export async function generateGlossaryFromPDF(pdfText, options = {}) {
+  const { language = 'Turkish' } = options;
+
+  const model = getGeminiModel();
+
+  const prompt = `You are an expert educator creating a concise GLOSSARY for students.
+
+GLOBAL RULES (CRITICAL):
+- You MUST treat the provided PDF content as your ONLY source of truth.
+- Do NOT use any outside knowledge, training data, or assumptions that are not explicitly supported by the PDF text.
+- If a term is not clearly present or explained in the PDF, you must NOT include it.
+
+TASK:
+- Identify the MOST IMPORTANT technical terms, concepts or key phrases from the PDF.
+- Focus on concepts that are critical for understanding the material (definitions, key processes, classifications, important principles).
+- Use ${language} for all output.
+- Aim for 8–20 entries depending on how rich the text is.
+
+For each term provide:
+- "term": short name of the concept (1–5 words).
+- "definition": short, student‑friendly explanation (1–3 sentences) based ONLY on the PDF.
+- "category": optional high‑level group, e.g. "tanım", "tehlike türü", "önlem", "ilke".
+- "importance": one of "high", "medium", "low" (relative importance for exam study).
+
+PDF Content:
+${pdfText.substring(0, 20000)}
+
+Return ONLY valid JSON (no markdown) in this exact format:
+{
+  "terms": [
+    {
+      "term": "kısa kavram adı",
+      "definition": "PDF'ye dayalı, 1–3 cümlelik açıklama.",
+      "category": "tanım",
+      "importance": "high"
+    }
+  ]
+}`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    let text = response.text();
+    text = text.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('AI did not return valid JSON for glossary');
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!parsed.terms || !Array.isArray(parsed.terms)) {
+      throw new Error('AI response missing terms array');
+    }
+
+    const terms = parsed.terms
+      .map((t) => ({
+        term: typeof t.term === 'string' ? t.term.trim() : String(t.term || ''),
+        definition:
+          typeof t.definition === 'string'
+            ? t.definition.trim()
+            : String(t.definition || ''),
+        category:
+          typeof t.category === 'string'
+            ? t.category.trim()
+            : t.category
+            ? String(t.category)
+            : null,
+        importance:
+          t.importance === 'high' || t.importance === 'medium' || t.importance === 'low'
+            ? t.importance
+            : 'medium',
+      }))
+      .filter((t) => t.term && t.definition);
+
+    console.log(`✅ Generated ${terms.length} glossary terms (Gemini)`);
+    return terms;
+  } catch (error) {
+    console.error('❌ Gemini glossary error:', error.message);
+    throw new Error('Failed to generate glossary: ' + error.message);
+  }
+}

@@ -37,6 +37,11 @@ const PDFViewerPage = () => {
   const [pdfNotes, setPdfNotes] = useState('');
   const [notesLoaded, setNotesLoaded] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
+  const [activeRightTab, setActiveRightTab] = useState('chat'); // 'chat' | 'glossary'
+  const [glossaryTerms, setGlossaryTerms] = useState([]);
+  const [glossaryLoading, setGlossaryLoading] = useState(false);
+  const [glossaryError, setGlossaryError] = useState(null);
+  const [bookmarks, setBookmarks] = useState([]);
 
   useEffect(() => {
     loadPDF();
@@ -155,6 +160,34 @@ const PDFViewerPage = () => {
     }
   }, [pdfNotes, pdf, notesLoaded]);
 
+  // Load bookmarks for this PDF
+  useEffect(() => {
+    if (!pdf) return;
+    const storageKey = `pdf_bookmarks_${pdf.id}`;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setBookmarks(parsed);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load PDF bookmarks from localStorage:', e);
+    }
+  }, [pdf]);
+
+  // Persist bookmarks whenever they change
+  useEffect(() => {
+    if (!pdf) return;
+    const storageKey = `pdf_bookmarks_${pdf.id}`;
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(bookmarks));
+    } catch (e) {
+      console.error('Failed to save PDF bookmarks to localStorage:', e);
+    }
+  }, [bookmarks, pdf]);
+
   const onDocumentLoadSuccess = ({ numPages }) => {
     setNumPages(numPages);
   };
@@ -182,6 +215,53 @@ const PDFViewerPage = () => {
     link.href = pdfUrl;
     link.download = pdf.file_name;
     link.click();
+  };
+
+  const handleGenerateGlossary = async () => {
+    if (!pdf || glossaryLoading) return;
+    setGlossaryLoading(true);
+    setGlossaryError(null);
+    try {
+      const response = await fetch('http://localhost:3001/api/analyze/pdf/glossary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdfId: pdf.id })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        console.error('Glossary error:', data);
+        throw new Error(data.error || 'Failed to generate glossary');
+      }
+      setGlossaryTerms(Array.isArray(data.terms) ? data.terms : []);
+    } catch (err) {
+      console.error('Glossary error:', err);
+      setGlossaryError(err.message || 'Failed to generate glossary');
+    } finally {
+      setGlossaryLoading(false);
+    }
+  };
+
+  const handleAddBookmark = () => {
+    if (!pdf || !numPages) return;
+    const page = pageNumber;
+    const defaultLabel = `Page ${page}`;
+    const label = window.prompt('Bookmark name:', defaultLabel);
+    if (!label) return;
+    setBookmarks(prev => {
+      // avoid duplicates for same page+label
+      const exists = prev.some(b => b.page === page && b.label === label);
+      if (exists) return prev;
+      const next = [
+        ...prev,
+        { id: `${page}-${Date.now()}`, page, label: label.trim() || defaultLabel }
+      ];
+      // sort by page
+      return next.sort((a, b) => a.page - b.page);
+    });
+  };
+
+  const handleRemoveBookmark = (id) => {
+    setBookmarks(prev => prev.filter(b => b.id !== id));
   };
 
   const handleSendQuestion = async () => {
@@ -328,85 +408,191 @@ const PDFViewerPage = () => {
             </div>
           </div>
 
-          {/* Right Side - AI Chat + Notes */}
+          {/* Right Side - AI Chat + Glossary + Notes */}
           <div className="w-[480px] flex flex-col max-h-[calc(100vh-200px)]">
-            {/* Chat Card */}
+            {/* Chat / Glossary Card */}
             <div className="flex flex-col bg-white dark:bg-zinc-900 border-2 border-gray-300 dark:border-zinc-700 rounded-2xl overflow-hidden flex-1">
               {/* Chat Header */}
               <div className="p-6 border-b border-gray-200 dark:border-zinc-800 flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
-                    {t('pdf_ai_title')}
+                    {activeRightTab === 'chat' ? t('pdf_ai_title') : 'Glossary'}
                   </h2>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    {t('pdf_ai_subtitle')}
-                  </p>
+                  {activeRightTab === 'chat' ? (
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {t('pdf_ai_subtitle')}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Important terms and definitions extracted from this PDF.
+                    </p>
+                  )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowNotes((v) => !v)}
-                  className="inline-flex items-center rounded-full border border-gray-300 dark:border-zinc-700 px-3 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-zinc-900 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
-                >
-                  {showNotes ? 'Hide notes' : 'Notes'}
-                </button>
-              </div>
-
-              {/* Chat Messages */}
-              <div className="flex-1 p-6 overflow-y-auto space-y-4">
-                {chatMessages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex gap-3 ${msg.sender === 'user' ? 'flex-row-reverse text-right' : ''}`}
-                  >
-                    <div
-                      className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                        msg.sender === 'user'
-                          ? 'bg-gray-300 dark:bg-zinc-700 text-gray-900 dark:text-white'
-                          : 'bg-gradient-to-br from-blue-500 to-purple-500 text-white'
+                <div className="flex flex-col items-end gap-2">
+                  <div className="inline-flex items-center rounded-full bg-gray-100 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 p-1 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setActiveRightTab('chat')}
+                      className={`px-3 py-1 rounded-full font-medium ${
+                        activeRightTab === 'chat'
+                          ? 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-white shadow-sm'
+                          : 'text-gray-600 dark:text-gray-300'
                       }`}
                     >
-                      <span className="text-sm font-bold">
-                        {msg.sender === 'user' ? 'You' : 'AI'}
-                      </span>
-                    </div>
-                    <div
-                      className={`max-w-[80%] rounded-2xl p-4 text-sm ${
-                        msg.sender === 'user'
-                          ? 'bg-blue-500 text-white dark:bg-blue-600'
-                          : 'bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-gray-300'
+                      Chat
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveRightTab('glossary')}
+                      className={`px-3 py-1 rounded-full font-medium ${
+                        activeRightTab === 'glossary'
+                          ? 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-white shadow-sm'
+                          : 'text-gray-600 dark:text-gray-300'
                       }`}
                     >
-                      <p>{msg.text}</p>
-                    </div>
+                      Glossary
+                    </button>
                   </div>
-                ))}
-              </div>
-
-              {/* Chat Input */}
-              <div className="p-6 border-t border-gray-200 dark:border-zinc-800">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder={t('pdf_ai_input_placeholder')}
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleSendQuestion();
-                      }
-                    }}
-                    className="flex-1 px-4 py-3 bg-gray-100 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
-                  />
                   <button
-                    onClick={handleSendQuestion}
-                    disabled={chatLoading || !chatInput.trim()}
-                    className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                    type="button"
+                    onClick={() => setShowNotes((v) => !v)}
+                    className="inline-flex items-center rounded-full border border-gray-300 dark:border-zinc-700 px-3 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-zinc-900 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
                   >
-                    {chatLoading ? t('pdf_ai_sending') : t('pdf_ai_send')}
+                    {showNotes ? 'Hide notes' : 'Notes'}
                   </button>
                 </div>
               </div>
+
+              {activeRightTab === 'chat' ? (
+                <>
+                  {/* Chat Messages */}
+                  <div className="flex-1 p-6 overflow-y-auto space-y-4">
+                    {chatMessages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        className={`flex gap-3 ${msg.sender === 'user' ? 'flex-row-reverse text-right' : ''}`}
+                      >
+                        <div
+                          className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                            msg.sender === 'user'
+                              ? 'bg-gray-300 dark:bg-zinc-700 text-gray-900 dark:text-white'
+                              : 'bg-gradient-to-br from-blue-500 to-purple-500 text-white'
+                          }`}
+                        >
+                          <span className="text-sm font-bold">
+                            {msg.sender === 'user' ? 'You' : 'AI'}
+                          </span>
+                        </div>
+                        <div
+                          className={`max-w-[80%] rounded-2xl p-4 text-sm ${
+                            msg.sender === 'user'
+                              ? 'bg-blue-500 text-white dark:bg-blue-600'
+                              : 'bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-gray-300'
+                          }`}
+                        >
+                          <p>{msg.text}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Chat Input */}
+                  <div className="p-6 border-t border-gray-200 dark:border-zinc-800">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder={t('pdf_ai_input_placeholder')}
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSendQuestion();
+                          }
+                        }}
+                        className="flex-1 px-4 py-3 bg-gray-100 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                      />
+                      <button
+                        onClick={handleSendQuestion}
+                        disabled={chatLoading || !chatInput.trim()}
+                        className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {chatLoading ? t('pdf_ai_sending') : t('pdf_ai_send')}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1 flex flex-col p-6 overflow-y-auto space-y-4">
+                  {glossaryLoading && (
+                    <div className="flex items-center justify-center py-6 text-sm text-gray-600 dark:text-gray-300">
+                      <Loader className="w-5 h-5 mr-2 animate-spin" />
+                      <span>Generating glossary from this PDF...</span>
+                    </div>
+                  )}
+                  {!glossaryLoading && glossaryTerms.length === 0 && !glossaryError && (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center text-sm text-gray-600 dark:text-gray-300 gap-4">
+                      <p>Generate a glossary of the most important concepts in this PDF.</p>
+                      <button
+                        type="button"
+                        onClick={handleGenerateGlossary}
+                        className="px-5 py-2 rounded-lg bg-gray-900 text-white dark:bg-white dark:text-black text-sm font-semibold hover:opacity-90"
+                      >
+                        Generate glossary
+                      </button>
+                    </div>
+                  )}
+                  {glossaryError && !glossaryLoading && (
+                    <div className="text-sm text-red-500 dark:text-red-400">
+                      {glossaryError}
+                    </div>
+                  )}
+                  {!glossaryLoading && glossaryTerms.length > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleGenerateGlossary}
+                        className="self-start mb-2 px-4 py-1.5 rounded-lg border border-gray-300 dark:border-zinc-700 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-zinc-800"
+                      >
+                        Regenerate glossary
+                      </button>
+                      <div className="space-y-3">
+                        {glossaryTerms.map((term, index) => (
+                          <div
+                            key={`${term.term}-${index}`}
+                            className="rounded-xl border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900/60 px-4 py-3 text-sm"
+                          >
+                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                              <h3 className="font-semibold text-gray-900 dark:text-white">
+                                {term.term}
+                              </h3>
+                              {term.importance && (
+                                <span className={`text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 ${
+                                  term.importance === 'high'
+                                    ? 'bg-red-500/10 text-red-500'
+                                    : term.importance === 'low'
+                                    ? 'bg-gray-500/10 text-gray-400'
+                                    : 'bg-amber-500/10 text-amber-500'
+                                }`}>
+                                  {term.importance}
+                                </span>
+                              )}
+                            </div>
+                            {term.category && (
+                              <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">
+                                {term.category}
+                              </p>
+                            )}
+                            <p className="text-gray-800 dark:text-gray-200 text-sm">
+                              {term.definition}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Notes Card (collapsible) */}
@@ -456,6 +642,39 @@ const PDFViewerPage = () => {
             >
               <ZoomIn className="w-5 h-5" />
             </button>
+          </div>
+
+          {/* Bookmark bar */}
+          <div className="flex items-center max-w-[40%] overflow-x-auto space-x-2 px-2">
+            <button
+              type="button"
+              onClick={handleAddBookmark}
+              className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-zinc-700"
+            >
+              + Bookmark
+            </button>
+            {bookmarks.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => setPageNumber(b.page)}
+                className="group flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full border border-gray-300 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-zinc-800"
+              >
+                <span>{b.page}</span>
+                <span className="truncate max-w-[120px] text-gray-500 dark:text-gray-400 group-hover:text-gray-800 dark:group-hover:text-gray-100">
+                  {b.label}
+                </span>
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRemoveBookmark(b.id);
+                  }}
+                  className="ml-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                >
+                  ×
+                </span>
+              </button>
+            ))}
           </div>
 
           {/* Page Navigation */}

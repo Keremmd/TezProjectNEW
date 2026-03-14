@@ -1,6 +1,6 @@
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
-import { analyzePDF as analyzePDFGemini, answerQuestionAboutPDF as answerQuestionAboutPDFGemini } from '../utils/gemini.js';
+import { analyzePDF as analyzePDFGemini, answerQuestionAboutPDF as answerQuestionAboutPDFGemini, generateGlossaryFromPDF } from '../utils/gemini.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -80,6 +80,73 @@ router.post('/pdf', async (req, res) => {
     res.status(500).json({ 
       error: 'Failed to analyze PDF',
       message: error.message 
+    });
+  }
+});
+
+/**
+ * POST /api/analyze/pdf/glossary
+ * Extract important glossary terms from a PDF using Gemini.
+ */
+router.post('/pdf/glossary', async (req, res) => {
+  try {
+    const { pdfId } = req.body;
+
+    if (!pdfId) {
+      return res.status(400).json({ error: 'pdfId is required' });
+    }
+
+    // Get PDF from database
+    const { data: pdf, error: pdfError } = await supabase
+      .from('pdfs')
+      .select('*')
+      .eq('id', pdfId)
+      .single();
+
+    if (pdfError || !pdf) {
+      return res.status(404).json({ error: 'PDF not found' });
+    }
+
+    // Download PDF from Supabase Storage
+    const { data: pdfFile, error: downloadError } = await supabase
+      .storage
+      .from('pdfs')
+      .download(pdf.file_path);
+
+    if (downloadError) {
+      return res.status(500).json({
+        error: 'Failed to download PDF',
+        details: downloadError.message
+      });
+    }
+
+    // Convert PDF to text
+    const pdfParse = (await import('pdf-parse')).default;
+    const arrayBuffer = await pdfFile.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const pdfData = await pdfParse(buffer);
+    const pdfText = pdfData.text;
+
+    console.log(`📄 [Glossary] PDF text extracted: ${pdfText.length} characters`);
+
+    const terms = await generateGlossaryFromPDF(pdfText, {
+      language: 'Turkish'
+    });
+
+    return res.json({
+      success: true,
+      terms,
+      pdf: {
+        id: pdf.id,
+        name: pdf.file_name,
+        pages: pdfData.numpages
+      }
+    });
+  } catch (error) {
+    console.error('Error generating PDF glossary:', error);
+    return res.status(500).json({
+      error: 'Failed to generate glossary',
+      message: error.message
     });
   }
 });
