@@ -10,7 +10,6 @@ import {
   ZoomIn,
   ZoomOut,
   Download,
-  Share2,
   X,
   Loader
 } from 'lucide-react';
@@ -259,12 +258,6 @@ const PDFViewerPage = () => {
               title="Download"
             >
               <Download className="w-5 h-5" />
-            </button>
-            <button
-              className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
-              title="Share"
-            >
-              <Share2 className="w-5 h-5" />
             </button>
           </div>
         </div>
