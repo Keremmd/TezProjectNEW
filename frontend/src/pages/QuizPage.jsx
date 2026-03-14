@@ -264,7 +264,7 @@ const QuizPage = () => {
           <table>
             <thead>
               <tr>
-                <th style="width: 40px;">#</th>
+                <th style="width: 48px;">#</th>
                 <th>Question</th>
                 <th style="width: 25%;">Your answer</th>
                 <th style="width: 25%;">Correct answer</th>
@@ -279,7 +279,14 @@ const QuizPage = () => {
                   const rowClass = isCorrect ? 'correct' : 'incorrect';
                   return `
                     <tr class="${rowClass}">
-                      <td>${index + 1}</td>
+                      <td>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                          <span>${index + 1}</span>
+                          <span style="font-size:12px;">
+                            ${isCorrect ? '✔️' : '✖️'}
+                          </span>
+                        </div>
+                      </td>
                       <td>
                         <div class="question-text">${index + 1}. ${q.question_text}</div>
                         ${explanation
@@ -473,9 +480,6 @@ const QuizPage = () => {
                       </span>
                       <span className="uppercase tracking-[0.16em] text-[10px] text-slate-400">Question</span>
                     </div>
-                    <span className="text-[11px] text-slate-500">
-                      {currentQuestion.points ?? 1} pt{(currentQuestion.points ?? 1) > 1 ? 's' : ''}
-                    </span>
                   </div>
                   <h2 className="text-lg sm:text-xl md:text-2xl font-semibold text-slate-50 leading-relaxed">
                     {currentQuestion.question_text}
