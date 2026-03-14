@@ -37,7 +37,7 @@ const PDFViewerPage = () => {
   const [pdfNotes, setPdfNotes] = useState('');
   const [notesLoaded, setNotesLoaded] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
-  const [activeRightTab, setActiveRightTab] = useState('chat'); // 'chat' | 'glossary'
+  const [activeRightTab, setActiveRightTab] = useState('chat'); // 'chat' | 'glossary' | 'highlights'
   const [glossaryTerms, setGlossaryTerms] = useState([]);
   const [glossaryLoaded, setGlossaryLoaded] = useState(false);
   const [glossaryLoading, setGlossaryLoading] = useState(false);
@@ -46,6 +46,14 @@ const PDFViewerPage = () => {
   const [showBookmarkModal, setShowBookmarkModal] = useState(false);
   const [bookmarkLabel, setBookmarkLabel] = useState('');
   const [showBookmarksList, setShowBookmarksList] = useState(false);
+  const [highlights, setHighlights] = useState([]);
+  const [selectionMenu, setSelectionMenu] = useState(null); // { text, page, x, y }
+  const [highlightNoteModal, setHighlightNoteModal] = useState({
+    open: false,
+    text: '',
+    note: '',
+    page: 1
+  });
 
   useEffect(() => {
     loadPDF();
@@ -226,6 +234,36 @@ const PDFViewerPage = () => {
     }
   }, [glossaryTerms, pdf]);
 
+  // Load highlights for this PDF
+  useEffect(() => {
+    if (!pdf) return;
+    const keyBase = pdf.file_path || pdf.file_name || pdf.id;
+    const storageKey = `pdf_highlights_${keyBase}`;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setHighlights(parsed);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load PDF highlights from localStorage:', e);
+    }
+  }, [pdf]);
+
+  // Persist highlights whenever they change
+  useEffect(() => {
+    if (!pdf) return;
+    const keyBase = pdf.file_path || pdf.file_name || pdf.id;
+    const storageKey = `pdf_highlights_${keyBase}`;
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(highlights));
+    } catch (e) {
+      console.error('Failed to save PDF highlights to localStorage:', e);
+    }
+  }, [highlights, pdf]);
+
   const onDocumentLoadSuccess = ({ numPages }) => {
     setNumPages(numPages);
   };
@@ -277,6 +315,130 @@ const PDFViewerPage = () => {
     } finally {
       setGlossaryLoading(false);
     }
+  };
+
+  const clearSelectionMenu = () => {
+    setSelectionMenu(null);
+  };
+
+  const handlePdfMouseUp = () => {
+    if (!pdf || !numPages) {
+      clearSelectionMenu();
+      return;
+    }
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      clearSelectionMenu();
+      return;
+    }
+    const text = selection.toString().trim();
+    if (!text) {
+      clearSelectionMenu();
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    if (!rect || (rect.width === 0 && rect.height === 0)) {
+      clearSelectionMenu();
+      return;
+    }
+    setSelectionMenu({
+      text,
+      page: pageNumber,
+      x: rect.left + rect.width / 2,
+      y: rect.top - 8
+    });
+  };
+
+  const handleCreateHighlight = () => {
+    if (!selectionMenu) return;
+    const { text, page } = selectionMenu;
+    const snippet = text.length > 220 ? `${text.slice(0, 220)}…` : text;
+    setHighlights(prev => [
+      ...prev,
+      {
+        id: `h-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        page,
+        text: snippet,
+        note: '',
+        createdAt: new Date().toISOString()
+      }
+    ]);
+    clearSelectionMenu();
+    try {
+      const sel = window.getSelection();
+      if (sel) sel.removeAllRanges();
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleCreateBookmarkFromSelection = () => {
+    if (!selectionMenu) return;
+    const { text, page } = selectionMenu;
+    const rawLabel = text.trim();
+    const label =
+      rawLabel.length > 0
+        ? (rawLabel.length > 80 ? `${rawLabel.slice(0, 80)}…` : rawLabel)
+        : `Page ${page}`;
+    setBookmarks(prev => {
+      const exists = prev.some(b => b.page === page && b.label === label);
+      if (exists) return prev;
+      const next = [
+        ...prev,
+        { id: `${page}-${Date.now()}`, page, label }
+      ];
+      return next.sort((a, b) => a.page - b.page);
+    });
+    clearSelectionMenu();
+  };
+
+  const openHighlightNoteFromSelection = () => {
+    if (!selectionMenu) return;
+    setHighlightNoteModal({
+      open: true,
+      text: selectionMenu.text,
+      note: '',
+      page: selectionMenu.page
+    });
+    clearSelectionMenu();
+  };
+
+  const handleConfirmHighlightNote = () => {
+    if (!highlightNoteModal.open) return;
+    const text = (highlightNoteModal.text || '').trim();
+    const note = (highlightNoteModal.note || '').trim();
+    if (!text && !note) {
+      setHighlightNoteModal(prev => ({ ...prev, open: false }));
+      return;
+    }
+    const snippet = text.length > 220 ? `${text.slice(0, 220)}…` : text || note;
+    setHighlights(prev => [
+      ...prev,
+      {
+        id: `h-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        page: highlightNoteModal.page,
+        text: snippet,
+        note,
+        createdAt: new Date().toISOString()
+      }
+    ]);
+    setHighlightNoteModal({
+      open: false,
+      text: '',
+      note: '',
+      page: 1
+    });
+    try {
+      const sel = window.getSelection();
+      if (sel) sel.removeAllRanges();
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleRemoveHighlight = (id) => {
+    setHighlights(prev => prev.filter(h => h.id !== id));
   };
 
   const openBookmarkModal = () => {
@@ -420,37 +582,37 @@ const PDFViewerPage = () => {
         <div className="flex gap-6 max-w-[1800px] w-full">
           {/* Left Side - PDF Viewer */}
           <div className="flex-1 bg-white dark:bg-zinc-900 border-2 border-gray-300 dark:border-zinc-700 rounded-2xl p-6 overflow-auto max-h-[calc(100vh-200px)]">
-          <div className="flex justify-center">
-            <Document
-              file={pdfUrl}
-              onLoadSuccess={onDocumentLoadSuccess}
-              onLoadError={(error) => {
-                console.error('❌ PDF Load Error:', error);
-                setError('Failed to load PDF: ' + error.message);
-              }}
-              loading={
-                <div className="text-center py-12">
-                  <Loader className="w-12 h-12 text-gray-600 dark:text-white animate-spin mx-auto mb-4" />
-                  <p className="text-gray-900 dark:text-white">Loading PDF...</p>
-                </div>
-              }
-              error={
-                <div className="text-center py-12">
-                  <p className="text-red-500 dark:text-red-400">Failed to load PDF</p>
-                </div>
-              }
-            >
-              <Page
-                pageNumber={pageNumber}
-                scale={scale}
-                renderTextLayer={true}
-                renderAnnotationLayer={true}
-              />
-            </Document>
+            <div className="flex justify-center" onMouseUp={handlePdfMouseUp}>
+              <Document
+                file={pdfUrl}
+                onLoadSuccess={onDocumentLoadSuccess}
+                onLoadError={(error) => {
+                  console.error('❌ PDF Load Error:', error);
+                  setError('Failed to load PDF: ' + error.message);
+                }}
+                loading={
+                  <div className="text-center py-12">
+                    <Loader className="w-12 h-12 text-gray-600 dark:text-white animate-spin mx-auto mb-4" />
+                    <p className="text-gray-900 dark:text-white">Loading PDF...</p>
+                  </div>
+                }
+                error={
+                  <div className="text-center py-12">
+                    <p className="text-red-500 dark:text-red-400">Failed to load PDF</p>
+                  </div>
+                }
+              >
+                <Page
+                  pageNumber={pageNumber}
+                  scale={scale}
+                  renderTextLayer={true}
+                  renderAnnotationLayer={true}
+                />
+              </Document>
             </div>
           </div>
 
-          {/* Right Side - AI Chat + Glossary + Notes */}
+          {/* Right Side - AI Chat + Glossary + Notes + Highlights */}
           <div className="w-[480px] flex flex-col max-h-[calc(100vh-200px)]">
             {/* Chat / Glossary Card */}
             <div className="flex flex-col bg-white dark:bg-zinc-900 border-2 border-gray-300 dark:border-zinc-700 rounded-2xl overflow-hidden flex-1">
@@ -458,15 +620,25 @@ const PDFViewerPage = () => {
               <div className="p-6 border-b border-gray-200 dark:border-zinc-800 flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
-                    {activeRightTab === 'chat' ? t('pdf_ai_title') : 'Glossary'}
+                    {activeRightTab === 'chat'
+                      ? t('pdf_ai_title')
+                      : activeRightTab === 'glossary'
+                      ? 'Glossary'
+                      : 'Highlights'}
                   </h2>
-                  {activeRightTab === 'chat' ? (
+                  {activeRightTab === 'chat' && (
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       {t('pdf_ai_subtitle')}
                     </p>
-                  ) : (
+                  )}
+                  {activeRightTab === 'glossary' && (
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       Important terms and definitions extracted from this PDF.
+                    </p>
+                  )}
+                  {activeRightTab === 'highlights' && (
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Text you highlighted from this PDF. Click to jump to that page.
                     </p>
                   )}
                 </div>
@@ -494,6 +666,17 @@ const PDFViewerPage = () => {
                     >
                       Glossary
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveRightTab('highlights')}
+                      className={`px-3 py-1 rounded-full font-medium ${
+                        activeRightTab === 'highlights'
+                          ? 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-white shadow-sm'
+                          : 'text-gray-600 dark:text-gray-300'
+                      }`}
+                    >
+                      Highlights
+                    </button>
                   </div>
                   <button
                     type="button"
@@ -505,7 +688,7 @@ const PDFViewerPage = () => {
                 </div>
               </div>
 
-              {activeRightTab === 'chat' ? (
+              {activeRightTab === 'chat' && (
                 <>
                   {/* Chat Messages */}
                   <div className="flex-1 p-6 overflow-y-auto space-y-4">
@@ -564,7 +747,9 @@ const PDFViewerPage = () => {
                     </div>
                   </div>
                 </>
-              ) : (
+              )}
+
+              {activeRightTab === 'glossary' && (
                 <div className="flex-1 flex flex-col p-6 overflow-y-auto space-y-4">
                   {glossaryLoading && (
                     <div className="flex items-center justify-center py-6 text-sm text-gray-600 dark:text-gray-300">
@@ -635,6 +820,61 @@ const PDFViewerPage = () => {
                   )}
                 </div>
               )}
+
+              {activeRightTab === 'highlights' && (
+                <div className="flex-1 flex flex-col p-6 overflow-y-auto space-y-3">
+                  {highlights.length === 0 ? (
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Henüz highlight yok. PDF üzerinde metin seçip açılan menüden
+                      <span className="font-semibold"> Highlight</span> veya
+                      <span className="font-semibold"> Not ekle</span> seçebilirsin.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {highlights
+                        .slice()
+                        .sort((a, b) => a.page - b.page)
+                        .map((h) => (
+                          <li
+                            key={h.id}
+                            className="rounded-xl border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900/60 px-4 py-3 text-sm flex flex-col gap-1"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setPageNumber(h.page)}
+                                className="inline-flex items-center gap-2 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                              >
+                                <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-200 text-[11px]">
+                                  Page {h.page}
+                                </span>
+                                <span>Go to highlight</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveHighlight(h.id)}
+                                className="p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                                aria-label="Remove highlight"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                            {h.text && (
+                              <p className="text-gray-800 dark:text-gray-200 text-xs italic line-clamp-3">
+                                “{h.text}”
+                              </p>
+                            )}
+                            {h.note && (
+                              <p className="text-[11px] text-gray-600 dark:text-gray-400">
+                                Not: {h.note}
+                              </p>
+                            )}
+                          </li>
+                        ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Notes Card (collapsible) */}
@@ -661,6 +901,43 @@ const PDFViewerPage = () => {
           </div>
         </div>
       </div>
+
+      {/* Selection action menu for text highlights */}
+      {selectionMenu && (
+        <div
+          className="fixed z-40"
+          style={{
+            top: Math.max(selectionMenu.y, 80),
+            left: selectionMenu.x
+          }}
+        >
+          <div className="inline-flex items-center gap-1 rounded-full bg-gray-900 text-white text-[11px] px-2 py-1 shadow-lg border border-gray-700">
+            <button
+              type="button"
+              onClick={handleCreateHighlight}
+              className="px-2 py-0.5 rounded-full hover:bg-gray-700"
+            >
+              Highlight
+            </button>
+            <span className="h-4 w-px bg-gray-700" />
+            <button
+              type="button"
+              onClick={handleCreateBookmarkFromSelection}
+              className="px-2 py-0.5 rounded-full hover:bg-gray-700 whitespace-nowrap"
+            >
+              Bookmark yap
+            </button>
+            <span className="h-4 w-px bg-gray-700" />
+            <button
+              type="button"
+              onClick={openHighlightNoteFromSelection}
+              className="px-2 py-0.5 rounded-full hover:bg-gray-700 whitespace-nowrap"
+            >
+              Not ekle
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Bottom Controls */}
       <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-zinc-900 border-t border-gray-200 dark:border-zinc-800">
@@ -756,6 +1033,54 @@ const PDFViewerPage = () => {
           </div>
         </div>
       </div>
+
+      {/* Highlight note modal */}
+      {highlightNoteModal.open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setHighlightNoteModal(prev => ({ ...prev, open: false }))}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="highlight-modal-title"
+        >
+          <div
+            className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl border border-gray-200 dark:border-zinc-700 p-6 w-full max-w-md mx-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 id="highlight-modal-title" className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+              Highlight için not ekle
+            </h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-2">
+              Seçilen metin:
+            </p>
+            <p className="text-xs text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-zinc-900/60 rounded-lg px-3 py-2 mb-3 max-h-24 overflow-y-auto">
+              {highlightNoteModal.text}
+            </p>
+            <textarea
+              value={highlightNoteModal.note}
+              onChange={e => setHighlightNoteModal(prev => ({ ...prev, note: e.target.value }))}
+              placeholder="Bu highlight için kısa bir not yaz..."
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-gray-900 dark:text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm min-h-[80px] resize-none"
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => setHighlightNoteModal(prev => ({ ...prev, open: false }))}
+                className="px-4 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmHighlightNote}
+                className="px-4 py-2 text-sm font-medium bg-blue-600 dark:bg-blue-500 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-600"
+              >
+                Kaydet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bookmark name modal */}
       {showBookmarkModal && (
