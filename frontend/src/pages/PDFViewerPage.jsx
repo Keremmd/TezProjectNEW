@@ -34,6 +34,9 @@ const PDFViewerPage = () => {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [pdfNotes, setPdfNotes] = useState('');
+  const [notesLoaded, setNotesLoaded] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
 
   useEffect(() => {
     loadPDF();
@@ -124,6 +127,33 @@ const PDFViewerPage = () => {
       console.error('Failed to save PDF chat history to localStorage:', e);
     }
   }, [chatMessages, pdf, user]);
+
+  // Load persisted notes for this PDF on this device
+  useEffect(() => {
+    if (!pdf) return;
+    const storageKey = `pdf_notes_${pdf.id}`;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (typeof raw === 'string') {
+        setPdfNotes(raw);
+      }
+      setNotesLoaded(true);
+    } catch (e) {
+      console.error('Failed to load PDF notes from localStorage:', e);
+      setNotesLoaded(true);
+    }
+  }, [pdf]);
+
+  // Persist notes whenever they change
+  useEffect(() => {
+    if (!pdf || !notesLoaded) return;
+    const storageKey = `pdf_notes_${pdf.id}`;
+    try {
+      window.localStorage.setItem(storageKey, pdfNotes || '');
+    } catch (e) {
+      console.error('Failed to save PDF notes to localStorage:', e);
+    }
+  }, [pdfNotes, pdf, notesLoaded]);
 
   const onDocumentLoadSuccess = ({ numPages }) => {
     setNumPages(numPages);
@@ -298,74 +328,108 @@ const PDFViewerPage = () => {
             </div>
           </div>
 
-          {/* Right Side - AI Chat */}
-          <div className="w-[480px] flex flex-col bg-white dark:bg-zinc-900 border-2 border-gray-300 dark:border-zinc-700 rounded-2xl overflow-hidden max-h-[calc(100vh-200px)]">
-            {/* Chat Header */}
-            <div className="p-6 border-b border-gray-200 dark:border-zinc-800">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
-                {t('pdf_ai_title')}
-              </h2>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                {t('pdf_ai_subtitle')}
-              </p>
-            </div>
-
-            {/* Chat Messages */}
-            <div className="flex-1 p-6 overflow-y-auto space-y-4">
-              {chatMessages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex gap-3 ${msg.sender === 'user' ? 'flex-row-reverse text-right' : ''}`}
-                >
-                  <div
-                    className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      msg.sender === 'user'
-                        ? 'bg-gray-300 dark:bg-zinc-700 text-gray-900 dark:text-white'
-                        : 'bg-gradient-to-br from-blue-500 to-purple-500 text-white'
-                    }`}
-                  >
-                    <span className="text-sm font-bold">
-                      {msg.sender === 'user' ? 'You' : 'AI'}
-                    </span>
-                  </div>
-                  <div
-                    className={`max-w-[80%] rounded-2xl p-4 text-sm ${
-                      msg.sender === 'user'
-                        ? 'bg-blue-500 text-white dark:bg-blue-600'
-                        : 'bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-gray-300'
-                    }`}
-                  >
-                    <p>{msg.text}</p>
-                  </div>
+          {/* Right Side - AI Chat + Notes */}
+          <div className="w-[480px] flex flex-col max-h-[calc(100vh-200px)]">
+            {/* Chat Card */}
+            <div className="flex flex-col bg-white dark:bg-zinc-900 border-2 border-gray-300 dark:border-zinc-700 rounded-2xl overflow-hidden flex-1">
+              {/* Chat Header */}
+              <div className="p-6 border-b border-gray-200 dark:border-zinc-800 flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+                    {t('pdf_ai_title')}
+                  </h2>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {t('pdf_ai_subtitle')}
+                  </p>
                 </div>
-              ))}
-            </div>
-
-            {/* Chat Input */}
-            <div className="p-6 border-t border-gray-200 dark:border-zinc-800">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder={t('pdf_ai_input_placeholder')}
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleSendQuestion();
-                    }
-                  }}
-                  className="flex-1 px-4 py-3 bg-gray-100 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
-                />
                 <button
-                  onClick={handleSendQuestion}
-                  disabled={chatLoading || !chatInput.trim()}
-                  className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  type="button"
+                  onClick={() => setShowNotes((v) => !v)}
+                  className="inline-flex items-center rounded-full border border-gray-300 dark:border-zinc-700 px-3 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-zinc-900 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
                 >
-                  {chatLoading ? t('pdf_ai_sending') : t('pdf_ai_send')}
+                  {showNotes ? 'Hide notes' : 'Notes'}
                 </button>
               </div>
+
+              {/* Chat Messages */}
+              <div className="flex-1 p-6 overflow-y-auto space-y-4">
+                {chatMessages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`flex gap-3 ${msg.sender === 'user' ? 'flex-row-reverse text-right' : ''}`}
+                  >
+                    <div
+                      className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                        msg.sender === 'user'
+                          ? 'bg-gray-300 dark:bg-zinc-700 text-gray-900 dark:text-white'
+                          : 'bg-gradient-to-br from-blue-500 to-purple-500 text-white'
+                      }`}
+                    >
+                      <span className="text-sm font-bold">
+                        {msg.sender === 'user' ? 'You' : 'AI'}
+                      </span>
+                    </div>
+                    <div
+                      className={`max-w-[80%] rounded-2xl p-4 text-sm ${
+                        msg.sender === 'user'
+                          ? 'bg-blue-500 text-white dark:bg-blue-600'
+                          : 'bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-gray-300'
+                      }`}
+                    >
+                      <p>{msg.text}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Chat Input */}
+              <div className="p-6 border-t border-gray-200 dark:border-zinc-800">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder={t('pdf_ai_input_placeholder')}
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSendQuestion();
+                      }
+                    }}
+                    className="flex-1 px-4 py-3 bg-gray-100 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                  />
+                  <button
+                    onClick={handleSendQuestion}
+                    disabled={chatLoading || !chatInput.trim()}
+                    className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {chatLoading ? t('pdf_ai_sending') : t('pdf_ai_send')}
+                  </button>
+                </div>
+              </div>
             </div>
+
+            {/* Notes Card (collapsible) */}
+            {showNotes && (
+              <div className="mt-4 bg-white dark:bg-zinc-900 border-2 border-gray-300 dark:border-zinc-700 rounded-2xl p-5 flex flex-col">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                      Notes for this PDF
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Only you can see these notes. They are saved for this PDF on this device.
+                    </p>
+                  </div>
+                </div>
+                <textarea
+                  value={pdfNotes}
+                  onChange={(e) => setPdfNotes(e.target.value)}
+                  placeholder="Write down key points, page references, or questions for this PDF..."
+                  className="mt-2 flex-1 min-h-[140px] resize-none rounded-xl border border-gray-300 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>
