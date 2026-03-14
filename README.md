@@ -1,153 +1,141 @@
-# 🎓 LearnAI - AI-Powered Collaborative Learning Platform
+# 📚 StudyPDF (TezProject) – AI Destekli Sınav Çalışma Asistanı
 
-> Yapay Zeka ile Güçlendirilmiş İşbirlikçi Öğrenme Platformu
+Yükseköğretim öğrencilerinin PDF notları üzerinden akıllıca çalışabilmesi için tasarlanmış, **React + Express + Supabase + Google Gemini** tabanlı bir web uygulaması.
 
 ## 📋 Proje Hakkında
 
-LearnAI, yükseköğretim öğrencilerinin akademik materyallerini daha etkili bir şekilde öğrenmelerine yardımcı olmak için geliştirilmiş, yapay zeka destekli bir web platformudur.
+StudyPDF, ders PDF’lerini merkeze alarak:
 
-### 🎯 Ana Özellikler
+- PDF’lerden **otomatik quiz** üretir,
+- Quizleri zamanlayarak **süreli deneme** yapmanı sağlar,
+- Sorulardan **flashcard desteği** oluşturur,
+- PDF üzerinde **AI sohbet** ile zor konuları açıklar,
+- Çalışma sonuçlarını **detaylı CSV / PDF rapor** olarak indirmeni sağlar.
 
-- 📄 **PDF İşleme**: Akademik PDF'leri otomatik olarak analiz eder
-- 🤖 **AI Özetleme**: GPT-4 kullanarak akıllı özetler oluşturur
-- 📝 **Quiz Üretimi**: Otomatik quiz ve soru oluşturma
-- 🔑 **Anahtar Kavram Çıkarma**: Önemli tanım ve formülleri tespit eder
-- 👥 **Sosyal Öğrenme**: Paylaşma, oylama ve yorum özellikleri
-- 📊 **Akran Değerlendirme**: Topluluk destekli içerik kalite kontrolü
+Bu proje bir **tez çalışması** kapsamında geliştirilmiştir.
+
+## 🎯 Ana Özellikler
+
+- 📄 **PDF Yönetimi**
+  - Supabase Storage üzerinden PDF yükleme ve listeleme
+  - Modern PDF görüntüleyici (`react-pdf`) ile sayfa sayfa görüntüleme
+  - Aynı ekranda sağ tarafta **AI Assistant** ile PDF’e özel soru–cevap
+
+- 📝 **Quiz Üretimi & Çözme**
+  - Google Gemini ile PDF içeriğinden **otomatik quiz üretimi**
+  - Zorluk seviyesi, soru sayısı ve gizlilik (public/private) ayarları
+  - Modern quiz arayüzü:
+    - Dark tema, glassmorphism, animasyonlu geçişler
+    - İlerleme barı, soru sayacı
+    - Opsiyon seçimleri için modern butonlar
+  - **Süreli quiz** (opsiyonel): dakika bazlı süre, otomatik bitirme
+  - Quiz sonunda:
+    - Doğru / yanlış sayısı ve yüzde skor
+    - Soru bazında doğru/yanlış, doğru cevap ve açıklamalar
+    - **Detaylı rapor indirme:** CSV ve yazdırılabilir PDF (print sayfası)
+
+- 🧠 **Flashcard Modu**
+  - Quiz sorularından otomatik **front/back flashcard** oluşturma
+  - Modern kart tasarımı, gradient arka planlar, smooth flip animasyonu
+  - Kartları karıştırma, sırayı sıfırlama, tek tek silme
+
+- 👥 **Topluluk & Çalışma Deneyimi**
+  - Supabase üzerinde community post’ları (fotoğraflı paylaşım) ve yorumlar
+  - (SQL migration rehberleri artık repo dışında; Supabase konsolu üzerinden yönetiliyor)
 
 ## 🏗️ Proje Yapısı
 
-```
+```bash
 TezProject/
-├── frontend/           # React frontend uygulaması
+├── frontend/                # React + Vite frontend
 │   ├── src/
-│   │   ├── pages/     # Sayfa componentleri
-│   │   ├── components/ # Reusable UI componentleri
-│   │   └── ...
+│   │   ├── pages/
+│   │   │   ├── LandingPage.jsx / LandingPageNew.jsx
+│   │   │   ├── LoginPage.jsx / RegisterPage.jsx
+│   │   │   ├── Dashboard.jsx
+│   │   │   ├── PDFViewerPage.jsx       # PDF + AI chat
+│   │   │   ├── QuizPage.jsx            # Quiz çözme + raporlar
+│   │   │   └── FlashcardPage.jsx       # Flashcard modu
+│   │   ├── contexts/ (Auth, I18n)
+│   │   └── lib/ (Supabase client, utils)
 │   └── README.md
-├── backend/           # Spring Boot backend (yakında)
-└── Req.md            # Detaylı proje gereksinimleri
+├── backend/                 # Node.js + Express API
+│   ├── server.js
+│   └── routes/
+│       ├── quiz.js          # Quiz üretimi (Gemini)
+│       ├── analyze.js       # PDF AI chat
+│       └── flashcards.js
+└── README.md                # Bu dosya
 ```
 
 ## 🛠️ Teknoloji Stack
 
 ### Frontend
-- **React** - UI framework
-- **Vite** - Build tool
-- **Tailwind CSS** - Styling
-- **React Router** - Navigation
-- **Lucide Icons** - Icon library
+- **React 19 + Vite** – SPA altyapısı
+- **Tailwind CSS** – Modern, responsive tasarım
+- **Framer Motion** – Animasyonlar ve geçişler
+- **React Router DOM** – Sayfa yönlendirme
+- **lucide-react** – İkon seti
+- **react-pdf / pdfjs-dist** – PDF görüntüleme
 
-### Backend (Planlanan)
-- **Java Spring Boot** - Backend framework
-- **PostgreSQL** - Veritabanı
-- **Spring Security** - Authentication
-- **JWT** - Token-based auth
-- **JPA/Hibernate** - ORM
+### Backend
+- **Node.js + Express** – API katmanı
+- **Supabase (PostgreSQL + Storage)** – Veritabanı & dosya depolama
+- **Google Gemini** – Quiz üretimi ve PDF AI asistanı
 
-### AI & Processing
-- **OpenAI API (GPT-4)** - AI işlemleri
-- **PyMuPDF** - PDF işleme
-- **Prompt Engineering** - AI optimizasyonu
+### Diğer
+- **Supabase RLS** – Güvenli veri erişimi
+- **Yerel LocalStorage** – PDF bazlı chat geçmişi saklama
 
-## 🚀 Başlangıç
+## 🚀 Çalıştırma
 
-### Frontend
+Ön koşul: Node.js 18+ ve bir Supabase projesi + Google AI Studio API key.
+
+### 1. Frontend
 
 ```bash
 cd frontend
 npm install
 npm run dev
+# Varsayılan: http://localhost:5173
 ```
 
-Frontend: http://localhost:5174
+### 2. Backend
 
-### Backend (Yakında)
+```bash
+cd backend
+npm install
 
-Backend implementasyonu için Req.md dosyasındaki spesifikasyonları takip edilecektir.
+# .env (örnek için backend/.env.example dosyasına bak)
+# SUPABASE_URL=...
+# SUPABASE_ANON_KEY=...
+# GOOGLE_API_KEY=...
 
-## 📱 Ekran Görüntüleri
+npm start
+# Varsayılan: http://localhost:3001
+```
 
-### ✅ Tamamlanan Sayfalar
+## 📱 Öne Çıkan Ekranlar
 
-- ✅ Landing Page - Modern hero section, features, CTA
-- ✅ Login Page - Professional authentication UI
-- ✅ Register Page - User registration with validation
+- **Dashboard** – Yüklenen PDF’ler, quiz listesi, çalışma akışı
+- **PDF Viewer + AI Assistant**
+  - Sol: PDF sayfa görünümü
+  - Sağ: “Ask anything about this PDF” AI chat
+- **QuizPage**
+  - Zamanlayıcı, progress bar, modern soru/option kartları
+  - Sonuç kartı + soru bazlı inceleme
+  - CSV / PDF detaylı rapor indirme
+- **FlashcardPage**
+  - Soru–cevap kartlarını tek ekranda çalışma
+  - Flip animasyonu, karıştırma ve silme
 
-### 🚧 Geliştirilecek Sayfalar
+## 🔐 Supabase Notları
 
-- 🚧 Dashboard - Ana kullanıcı paneli
-- 🚧 PDF Upload - Dosya yükleme arayüzü
-- 🚧 Summary View - AI özetlerini görüntüleme
-- 🚧 Quiz Interface - Soru çözme ekranı
-- 🚧 Social Feed - Paylaşım akışı
-- 🚧 Profile - Kullanıcı profil yönetimi
+- Proje, quizler, flashcardlar ve community için **Supabase tabloları + RLS** kullanır.
+- Storage içinde `pdfs` bucket’ı gereklidir (PDF dosyaları için).
+- Eski SQL migration rehber dosyaları repo’dan temizlenmiştir; üretim ortamında direkt Supabase Dashboard veya ayrı migration araçları kullanılmalıdır.
 
-## 📋 Geliştirme Aşamaları
+## 📄 Lisans & Durum
 
-### Phase 1: Frontend Foundation ✅
-- [x] Proje setup (Vite + React)
-- [x] Tailwind CSS configuration
-- [x] Routing setup
-- [x] Landing page
-- [x] Login page
-- [x] Register page
-
-### Phase 2: Backend Development 🚧
-- [ ] Spring Boot proje kurulumu
-- [ ] PostgreSQL veritabanı tasarımı
-- [ ] JWT authentication
-- [ ] User management API
-- [ ] PDF upload endpoint
-
-### Phase 3: AI Integration 📅
-- [ ] OpenAI API entegrasyonu
-- [ ] PDF text extraction
-- [ ] Summarization service
-- [ ] Quiz generation service
-- [ ] Key concept extraction
-
-### Phase 4: Social Features 📅
-- [ ] Paylaşım sistemi
-- [ ] Oylama mekanizması
-- [ ] Yorum sistemi
-- [ ] Kullanıcı puanlama
-
-### Phase 5: Testing & Deployment 📅
-- [ ] Unit tests
-- [ ] Integration tests
-- [ ] User acceptance testing
-- [ ] Production deployment
-
-## 🎨 Design Philosophy
-
-- **Modern & Clean**: Dribbble ve 21st.dev'den ilham alınmış
-- **User-Centric**: Kullanıcı deneyimi odaklı
-- **Accessible**: WCAG standartlarına uygun
-- **Responsive**: Tüm cihazlarda mükemmel görünüm
-- **Performance**: Hızlı ve optimize edilmiş
-
-## 🔧 Supabase (Community özelliği)
-
-Dashboard’daki **Community** bölümü (fotoğraf paylaşımı ve yorumlar) için Supabase’de şunlar gerekir:
-
-- **Tablo ve RLS**: `community_posts` ve `community_comments` migration ile oluşturulmuş olmalı.
-- **Storage**: Supabase Dashboard → **Storage** → **New bucket** → isim: `community`, **Public bucket** işaretli olsun. Böylece yüklenen fotoğraflar herkese açık URL ile kullanılabilir.
-
-## 📚 Dokümantasyon
-
-Detaylı teknik spesifikasyonlar ve sistem mimarisi için [Req.md](./Req.md) dosyasına bakınız.
-
-## 🤝 Katkıda Bulunma
-
-Bu proje tez çalışması kapsamında geliştirilmektedir.
-
-## 📄 Lisans
-
-Bu proje akademik amaçlı geliştirilmiştir.
-
----
-
-**Not**: Proje aktif geliştirme aşamasındadır. Her gün yeni özellikler eklenmektedir.
-
-**Geliştirme**: 2026
+- Proje **akademik/kişisel** kullanım içindir.
+- Aktif geliştirme altındadır; arayüz ve özellikler sık sık güncellenmektedir. 2026.***
