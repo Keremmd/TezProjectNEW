@@ -87,6 +87,20 @@ const MESSAGES = {
     community_filter_placeholder: 'Filter by course name...',
     community_clear_filter: 'Clear',
 
+    // Community – post detail & comments
+    community_post_detail_title: 'Posts & Comments',
+    community_post_detail_subtitle: 'Post details and answers from other students',
+    community_post_detail_hint:
+      'You can write exam-style answers, explanations or alternative solutions under this post.',
+    community_post_detail_comments_title: 'Answers',
+    community_post_detail_comments_empty:
+      'No comments yet. Be the first to write an answer.',
+    community_post_detail_comments_count: '{count} answers',
+    community_post_detail_answer_author_prefix: 'Answer by:',
+    community_post_detail_input_placeholder: 'Write your answer, solution or explanation...',
+    community_post_detail_input_helper:
+      'Please write the number, unit and reasoning clearly; you can also attach a solution photo if needed.',
+
     // My PDFs – card labels & buttons
     pdf_card_course: 'Course:',
     pdf_card_university: 'University:',
@@ -244,6 +258,20 @@ const MESSAGES = {
     community_add_post: 'Gönderi Ekle',
     community_filter_placeholder: 'Derse göre filtrele...',
     community_clear_filter: 'Temizle',
+
+    // Community – post detail & comments
+    community_post_detail_title: 'Gönderi ve Yorumlar',
+    community_post_detail_subtitle: 'Paylaşım detayları ve diğer öğrencilerin cevapları',
+    community_post_detail_hint:
+      'Bu paylaşımın altına sınav sorusu gibi cevaplar, açıklamalar veya farklı çözümler yazabilirsin.',
+    community_post_detail_comments_title: 'Cevaplar',
+    community_post_detail_comments_empty:
+      'Henüz yorum yapılmamış. Aşağıdan ilk çözümü veya açıklamayı yazabilirsin.',
+    community_post_detail_comments_count: '{count} cevap',
+    community_post_detail_answer_author_prefix: 'Cevap yazan:',
+    community_post_detail_input_placeholder: 'Cevabını, çözümünü veya açıklamanı yaz...',
+    community_post_detail_input_helper:
+      'Lütfen sayıyı, birimi ve mantığını açıkça yaz; gerekirse çözüm fotoğrafını da ekleyebilirsin.',
 
     // My PDFs – card labels & buttons
     pdf_card_course: 'Ders:',

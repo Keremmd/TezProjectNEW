@@ -124,12 +124,15 @@ const Dashboard = () => {
   const [selectedCommunityPost, setSelectedCommunityPost] = useState(null);
   const [communityComments, setCommunityComments] = useState([]);
   const [newCommentText, setNewCommentText] = useState('');
+  const [newCommentImage, setNewCommentImage] = useState(null);
   const [submittingComment, setSubmittingComment] = useState(false);
+  const [imagePreview, setImagePreview] = useState({ open: false, url: null, alt: '' });
   const [communityFilterCourse, setCommunityFilterCourse] = useState('');
   const [deleteCommunityPostModalOpen, setDeleteCommunityPostModalOpen] = useState(false);
   const [communityPostToDelete, setCommunityPostToDelete] = useState(null);
   const [deletingCommunityPost, setDeletingCommunityPost] = useState(false);
   const profileImageInputRef = useRef(null);
+  const commentsContainerRef = useRef(null);
   
   // Quiz states
   const [quizzes, setQuizzes] = useState([]);
@@ -1153,20 +1156,38 @@ const Dashboard = () => {
   };
 
   const submitCommunityComment = async () => {
-    if (!user || !selectedCommunityPost || !newCommentText.trim()) return;
+    if (!user || !selectedCommunityPost) return;
+    if (!newCommentText.trim() && !newCommentImage) return;
     setSubmittingComment(true);
     try {
       const authorName = [user.user_metadata?.first_name, user.user_metadata?.last_name].filter(Boolean).join(' ') || 'Kullanıcı';
+      let imageUrl = null;
+
+      if (newCommentImage) {
+        const ext = newCommentImage.name.split('.').pop() || 'jpg';
+        // Storage RLS policy bu bucket için muhtemelen "{auth.uid()}/..." formatını bekliyor.
+        // Bu yüzden postlarda kullandığımız path yapısını burada da tekrar kullanıyoruz.
+        const path = `${user.id}/${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('community')
+          .upload(path, newCommentImage, { upsert: false });
+        if (uploadError) throw uploadError;
+        const { data: urlData } = supabase.storage.from('community').getPublicUrl(path);
+        imageUrl = urlData.publicUrl;
+      }
+
       const { error } = await supabase
         .from('community_comments')
         .insert({
           post_id: selectedCommunityPost.id,
           user_id: user.id,
-          content: newCommentText.trim(),
-          author_name: authorName
+          content: newCommentText.trim() || null,
+          author_name: authorName,
+          image_url: imageUrl
         });
       if (error) throw error;
       setNewCommentText('');
+      setNewCommentImage(null);
       loadCommunityComments(selectedCommunityPost.id);
     } catch (err) {
       console.error('Error adding comment:', err);
@@ -5383,18 +5404,31 @@ const Dashboard = () => {
       {selectedCommunityPost && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-gray-100 dark:bg-zinc-900 border-2 border-gray-200 dark:border-zinc-800 rounded-2xl overflow-hidden max-w-2xl w-full max-h-[90vh] flex flex-col"
+            initial={{ opacity: 0, scale: 0.96, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-gradient-to-br from-gray-50 to-gray-100 dark:from-zinc-950 dark:to-zinc-900 border border-gray-200/70 dark:border-zinc-800 rounded-3xl overflow-hidden max-w-5xl w-full h-[80vh] max-h-[90vh] shadow-2xl flex flex-col"
           >
-            <div className="p-4 border-b border-gray-200 dark:border-zinc-800 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Posts &amp; Comments</h3>
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-gray-200/80 dark:border-zinc-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-xs font-semibold text-white shadow-md">
+                  {selectedCommunityPost.author_name?.[0]?.toUpperCase() || 'U'}
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+                    {t('community_post_detail_title')}
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {t('community_post_detail_subtitle')}
+                  </p>
+                </div>
+              </div>
               <div className="flex items-center gap-2">
                 {/* Delete button - only show for user's own posts */}
                 {user && selectedCommunityPost.user_id === user.id && (
                   <button
                     onClick={() => handleDeleteCommunityPost(selectedCommunityPost)}
-                    className="p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                    className="p-2 rounded-full text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                     title="Delete post"
                   >
                     <Trash2 className="w-5 h-5" />
@@ -5402,53 +5436,229 @@ const Dashboard = () => {
                 )}
                 <button
                   onClick={() => { setSelectedCommunityPost(null); setCommunityComments([]); setNewCommentText(''); }}
-                  className="p-2 rounded-lg text-gray-500 hover:bg-gray-200 dark:hover:bg-zinc-800"
+                  className="p-2 rounded-full text-gray-500 hover:bg-gray-200 dark:hover:bg-zinc-800 transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
-            <div className="overflow-y-auto flex-1 p-4 space-y-4">
-              <div className="rounded-xl overflow-hidden bg-gray-200 dark:bg-zinc-800">
-                <img src={selectedCommunityPost.image_url} alt={selectedCommunityPost.caption || ''} className="w-full max-h-80 object-contain" />
+
+            {/* Content */}
+            <div className="flex-1 flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-gray-200/80 dark:divide-zinc-800 min-h-0">
+              {/* Left: Post preview */}
+              <div className="md:w-[46%] h-full max-h-full overflow-y-auto p-5 space-y-4 bg-white/70 dark:bg-zinc-950/60">
+                <div className="rounded-2xl overflow-hidden bg-gray-200 dark:bg-zinc-800 border border-gray-200/80 dark:border-zinc-800 cursor-zoom-in">
+                  <img
+                    src={selectedCommunityPost.image_url}
+                    alt={selectedCommunityPost.caption || ''}
+                    className="w-full max-h-80 object-contain bg-black/5 dark:bg-black"
+                    onClick={() =>
+                      setImagePreview({
+                        open: true,
+                        url: selectedCommunityPost.image_url,
+                        alt: selectedCommunityPost.caption || ''
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-[11px] font-semibold text-white">
+                        {selectedCommunityPost.author_name?.[0]?.toUpperCase() || 'U'}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {selectedCommunityPost.author_name || 'User'}
+                        </p>
+                        <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                          {new Date(selectedCommunityPost.created_at).toLocaleString('tr-TR')}
+                        </p>
+                      </div>
+                    </div>
+                    {selectedCommunityPost.course_name && (
+                      <span className="inline-flex items-center rounded-full border border-blue-500/30 bg-blue-500/5 text-[11px] font-medium text-blue-600 dark:text-blue-300 px-2 py-0.5">
+                        {selectedCommunityPost.course_name}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-900 dark:text-gray-100 leading-relaxed">
+                    {selectedCommunityPost.caption || 'No description'}
+                  </p>
+                </div>
+                <div className="mt-4 rounded-2xl border border-dashed border-gray-300/80 dark:border-zinc-700/80 bg-gray-50/80 dark:bg-zinc-900/80 px-4 py-3 text-xs text-gray-600 dark:text-gray-400">
+                  {t('community_post_detail_hint')}
+                </div>
               </div>
-              <p className="text-gray-900 dark:text-white font-medium">{selectedCommunityPost.caption || 'No description'}</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">{selectedCommunityPost.author_name || 'User'} · {new Date(selectedCommunityPost.created_at).toLocaleString('tr-TR')}</p>
-              <div className="pt-2">
-                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Comments</p>
-                {communityComments.length === 0 ? (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">No comments yet. Be the first to write an answer.</p>
-                ) : (
-                  <ul className="space-y-3">
-                    {communityComments.map((c) => (
-                      <li key={c.id} className="bg-white dark:bg-zinc-800 rounded-lg p-3 text-sm text-gray-800 dark:text-gray-200">
-                        <p className="font-medium text-gray-700 dark:text-gray-300">{c.author_name || 'User'}</p>
-                        <p className="mt-1">{c.content}</p>
-                        <p className="text-xs text-gray-500 mt-1">{(c.created_at && new Date(c.created_at).toLocaleString('tr-TR')) || ''}</p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+
+              {/* Right: Comments thread */}
+              <div className="md:flex-1 flex flex-col h-full max-h-full min-h-0">
+                <div className="px-5 pt-4 pb-2 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      {t('community_post_detail_comments_title')}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {communityComments.length === 0
+                        ? t('community_post_detail_comments_empty')
+                        : t('community_post_detail_comments_count', { count: communityComments.length })}
+                    </p>
+                  </div>
+                  {user && (
+                    <div className="hidden md:flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                      <span>{t('community_post_detail_answer_author_prefix')}</span>
+                      <span className="font-medium text-gray-700 dark:text-gray-200">
+                        {user.user_metadata?.first_name || user.email}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  ref={commentsContainerRef}
+                  className="flex-1 px-5 pb-4 overflow-y-auto space-y-3"
+                >
+                  {communityComments.length === 0 ? (
+                    <div className="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-zinc-900/80 border border-dashed border-gray-300/80 dark:border-zinc-700 rounded-2xl px-4 py-3">
+                      {t('community_post_detail_comments_empty')}
+                    </div>
+                  ) : (
+                    <ul className="space-y-3">
+                      {communityComments.map((c) => {
+                        const isMe = user && c.user_id === user.id;
+                        return (
+                          <li
+                            key={c.id}
+                            className="w-full flex justify-end text-right"
+                          >
+                            <div className="max-w-full flex flex-col gap-1 items-end">
+                              <div
+                                className={`inline-flex items-center gap-2 mb-0.5 ${
+                                  isMe ? 'flex-row-reverse' : ''
+                                }`}
+                              >
+                                <p className="text-xs font-semibold text-gray-900 dark:text-gray-100">
+                                  {c.author_name || 'User'}
+                                </p>
+                                <span className="text-[10px] text-gray-500 dark:text-gray-500">
+                                  {(c.created_at && new Date(c.created_at).toLocaleString('tr-TR')) || ''}
+                                </span>
+                              </div>
+                              <div
+                                className={`rounded-2xl px-3 py-2 text-xs text-gray-800 dark:text-gray-100 shadow-sm text-left ${
+                                  isMe
+                                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white max-w-[60%] md:max-w-[55%]'
+                                    : 'bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 max-w-[75%] md:max-w-[65%]'
+                                }`}
+                              >
+                                {c.content}
+                              </div>
+                              {c.image_url && (
+                                <div className={`mt-1 ${isMe ? 'ml-auto' : ''}`}>
+                                  <img
+                                    src={c.image_url}
+                                    alt="Çözüm görseli"
+                                    className="max-h-40 rounded-xl border border-gray-200 dark:border-zinc-700 object-contain bg-black/5 dark:bg-black/40 cursor-zoom-in"
+                                    onClick={() =>
+                                      setImagePreview({
+                                        open: true,
+                                        url: c.image_url,
+                                        alt: 'Çözüm görseli'
+                                      })
+                                    }
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+
+                {/* Comment input */}
+                <div className="px-5 py-4 border-t border-gray-200/80 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80">
+                  <div className="flex items-end gap-3">
+                    <div className="flex-1 flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={newCommentText}
+                          onChange={(e) => setNewCommentText(e.target.value)}
+                          placeholder={t('community_post_detail_input_placeholder')}
+                          className="w-full px-4 py-2.5 bg-gray-50 dark:bg-zinc-900 border border-gray-300 dark:border-zinc-700 rounded-xl text-sm text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                        <label className="flex-shrink-0 inline-flex items-center justify-center h-10 w-10 rounded-xl border border-gray-300 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-zinc-800 cursor-pointer text-xs font-medium">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) setNewCommentImage(file);
+                            }}
+                          />
+                          +Img
+                        </label>
+                      </div>
+                      {newCommentImage && (
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                            Seçilen görsel: {newCommentImage.name}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setNewCommentImage(null)}
+                            className="text-[11px] text-gray-500 dark:text-gray-400 hover:underline"
+                          >
+                            Kaldır
+                          </button>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                          {t('community_post_detail_input_helper')}
+                        </p>
+                        <button
+                          onClick={submitCommunityComment}
+                          disabled={(!newCommentText.trim() && !newCommentImage) || submittingComment}
+                          className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1 shadow-sm"
+                        >
+                          <Send className="w-4 h-4" />
+                          {submittingComment ? 'Gönderiliyor...' : 'Gönder'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="p-4 border-t border-gray-200 dark:border-zinc-800 flex gap-2">
-              <input
-                type="text"
-                value={newCommentText}
-                onChange={(e) => setNewCommentText(e.target.value)}
-                placeholder="Write your answer or explanation..."
-                className="flex-1 px-4 py-3 bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <button
-                onClick={submitCommunityComment}
-                disabled={!newCommentText.trim() || submittingComment}
-                className="px-4 py-3 bg-blue-500 text-white rounded-xl font-medium hover:bg-blue-600 disabled:opacity-50 flex items-center gap-1"
-              >
-                <Send className="w-5 h-5" />
-                {submittingComment ? '...' : 'Send'}
-              </button>
             </div>
           </motion.div>
+        </div>
+      )}
+
+      {/* Image preview lightbox for community images */}
+      {imagePreview.open && imagePreview.url && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setImagePreview({ open: false, url: null, alt: '' })}
+        >
+          <button
+            type="button"
+            onClick={() => setImagePreview({ open: false, url: null, alt: '' })}
+            className="absolute top-4 right-4 text-gray-300 hover:text-white p-2 rounded-full bg-black/40"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          <div className="max-w-5xl max-h-[90vh] w-full flex items-center justify-center">
+            <img
+              src={imagePreview.url}
+              alt={imagePreview.alt || ''}
+              className="max-w-full max-h-[90vh] object-contain rounded-2xl border border-gray-700 bg-black"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
         </div>
       )}
 
