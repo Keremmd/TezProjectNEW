@@ -39,9 +39,13 @@ const PDFViewerPage = () => {
   const [showNotes, setShowNotes] = useState(false);
   const [activeRightTab, setActiveRightTab] = useState('chat'); // 'chat' | 'glossary'
   const [glossaryTerms, setGlossaryTerms] = useState([]);
+  const [glossaryLoaded, setGlossaryLoaded] = useState(false);
   const [glossaryLoading, setGlossaryLoading] = useState(false);
   const [glossaryError, setGlossaryError] = useState(null);
   const [bookmarks, setBookmarks] = useState([]);
+  const [showBookmarkModal, setShowBookmarkModal] = useState(false);
+  const [bookmarkLabel, setBookmarkLabel] = useState('');
+  const [showBookmarksList, setShowBookmarksList] = useState(false);
 
   useEffect(() => {
     loadPDF();
@@ -160,10 +164,11 @@ const PDFViewerPage = () => {
     }
   }, [pdfNotes, pdf, notesLoaded]);
 
-  // Load bookmarks for this PDF
+  // Load bookmarks for this PDF (persists across leaving/returning)
   useEffect(() => {
     if (!pdf) return;
-    const storageKey = `pdf_bookmarks_${pdf.id}`;
+    const keyBase = pdf.file_path || pdf.file_name || pdf.id;
+    const storageKey = `pdf_bookmarks_${keyBase}`;
     try {
       const raw = window.localStorage.getItem(storageKey);
       if (raw) {
@@ -180,13 +185,46 @@ const PDFViewerPage = () => {
   // Persist bookmarks whenever they change
   useEffect(() => {
     if (!pdf) return;
-    const storageKey = `pdf_bookmarks_${pdf.id}`;
+    const keyBase = pdf.file_path || pdf.file_name || pdf.id;
+    const storageKey = `pdf_bookmarks_${keyBase}`;
     try {
       window.localStorage.setItem(storageKey, JSON.stringify(bookmarks));
     } catch (e) {
-      console.error('Failed to save PDF bookmarks to localStorage:', e);
+      console.error('Failed to save PDF bookmarks from localStorage:', e);
     }
   }, [bookmarks, pdf]);
+
+  // Load persisted glossary for this PDF
+  useEffect(() => {
+    if (!pdf) return;
+    const storageKey = `pdf_glossary_${pdf.id}`;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setGlossaryTerms(parsed);
+        }
+        setGlossaryLoaded(true);
+      } else {
+        setGlossaryLoaded(true);
+      }
+    } catch (e) {
+      console.error('Failed to load PDF glossary from localStorage:', e);
+      setGlossaryLoaded(true);
+    }
+  }, [pdf]);
+
+  // Persist glossary when terms are loaded (after fetch)
+  useEffect(() => {
+    if (!pdf || glossaryTerms.length === 0) return;
+    const storageKey = `pdf_glossary_${pdf.id}`;
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(glossaryTerms));
+    } catch (e) {
+      console.error('Failed to save PDF glossary to localStorage:', e);
+    }
+  }, [glossaryTerms, pdf]);
 
   const onDocumentLoadSuccess = ({ numPages }) => {
     setNumPages(numPages);
@@ -241,24 +279,28 @@ const PDFViewerPage = () => {
     }
   };
 
-  const handleAddBookmark = () => {
+  const openBookmarkModal = () => {
     if (!pdf || !numPages) return;
+    setBookmarkLabel(`Page ${pageNumber}`);
+    setShowBookmarkModal(true);
+  };
+
+  const handleConfirmBookmark = () => {
+    const label = String(bookmarkLabel).trim() || `Page ${pageNumber}`;
     const page = pageNumber;
-    const defaultLabel = `Page ${page}`;
-    const label = window.prompt('Bookmark name:', defaultLabel);
-    if (!label) return;
     setBookmarks(prev => {
-      // avoid duplicates for same page+label
       const exists = prev.some(b => b.page === page && b.label === label);
       if (exists) return prev;
       const next = [
         ...prev,
-        { id: `${page}-${Date.now()}`, page, label: label.trim() || defaultLabel }
+        { id: `${page}-${Date.now()}`, page, label }
       ];
-      // sort by page
       return next.sort((a, b) => a.page - b.page);
     });
+    setShowBookmarkModal(false);
   };
+
+  const handleAddBookmark = () => openBookmarkModal();
 
   const handleRemoveBookmark = (id) => {
     setBookmarks(prev => prev.filter(b => b.id !== id));
@@ -621,9 +663,9 @@ const PDFViewerPage = () => {
       </div>
 
       {/* Bottom Controls */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-zinc-900 border-t border-gray-200 dark:border-zinc-800 py-4">
-        <div className="flex items-center justify-center space-x-6">
-          {/* Zoom Controls */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-zinc-900 border-t border-gray-200 dark:border-zinc-800">
+        <div className="flex items-center justify-center gap-4 py-3 px-4">
+          {/* Zoom */}
           <div className="flex items-center space-x-2">
             <button
               onClick={zoomOut}
@@ -644,37 +686,52 @@ const PDFViewerPage = () => {
             </button>
           </div>
 
-          {/* Bookmark bar */}
-          <div className="flex items-center max-w-[40%] overflow-x-auto space-x-2 px-2">
-            <button
-              type="button"
-              onClick={handleAddBookmark}
-              className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-zinc-700"
-            >
-              + Bookmark
-            </button>
-            {bookmarks.map((b) => (
+          {/* Bookmark: add button + toggle list */}
+          <div className="flex flex-col items-center min-w-0">
+            <div className="flex items-center gap-2">
               <button
-                key={b.id}
                 type="button"
-                onClick={() => setPageNumber(b.page)}
-                className="group flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full border border-gray-300 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-[11px] text-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-zinc-800"
+                onClick={handleAddBookmark}
+                className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-900 dark:text-white hover:bg-gray-300 dark:hover:bg-zinc-700"
               >
-                <span>{b.page}</span>
-                <span className="truncate max-w-[120px] text-gray-500 dark:text-gray-400 group-hover:text-gray-800 dark:group-hover:text-gray-100">
-                  {b.label}
-                </span>
-                <span
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleRemoveBookmark(b.id);
-                  }}
-                  className="ml-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                >
-                  ×
-                </span>
+                + Bookmark
               </button>
-            ))}
+              {bookmarks.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowBookmarksList(prev => !prev)}
+                  className="flex-shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-zinc-800"
+                >
+                  {showBookmarksList ? '▼' : '▲'} Bookmarks ({bookmarks.length})
+                </button>
+              )}
+            </div>
+            {showBookmarksList && bookmarks.length > 0 && (
+              <div className="mt-2 w-full max-w-md max-h-32 overflow-y-auto rounded-lg border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-800/80 shadow-lg">
+                <ul className="py-1">
+                  {bookmarks.map((b) => (
+                    <li key={b.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-zinc-700/50 border-b border-gray-100 dark:border-zinc-700 last:border-0">
+                      <button
+                        type="button"
+                        onClick={() => { setPageNumber(b.page); setShowBookmarksList(false); }}
+                        className="flex-1 text-left text-sm text-gray-800 dark:text-gray-100 truncate"
+                      >
+                        <span className="font-medium text-gray-500 dark:text-gray-400 mr-2">{b.page}</span>
+                        {b.label}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveBookmark(b.id)}
+                        className="flex-shrink-0 p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                        aria-label="Remove bookmark"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
 
           {/* Page Navigation */}
@@ -699,6 +756,54 @@ const PDFViewerPage = () => {
           </div>
         </div>
       </div>
+
+      {/* Bookmark name modal */}
+      {showBookmarkModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setShowBookmarkModal(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bookmark-modal-title"
+        >
+          <div
+            className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl border border-gray-200 dark:border-zinc-700 p-6 w-full max-w-sm mx-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 id="bookmark-modal-title" className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+              Bookmark name
+            </h3>
+            <input
+              type="text"
+              value={bookmarkLabel}
+              onChange={e => setBookmarkLabel(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleConfirmBookmark();
+                if (e.key === 'Escape') setShowBookmarkModal(false);
+              }}
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-gray-900 dark:text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="Page 1"
+              autoFocus
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => setShowBookmarkModal(false)}
+                className="px-4 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBookmark}
+                className="px-4 py-2 text-sm font-medium bg-blue-600 dark:bg-blue-500 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-600"
+              >
+                Tamam
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
