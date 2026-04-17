@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import quizRoutes from './routes/quiz.js';
 import analyzeRoutes from './routes/analyze.js';
 import flashcardRoutes from './routes/flashcards.js';
+import examRoutes from './routes/exams.js';
 
 dotenv.config();
 
@@ -19,6 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/quiz', quizRoutes);
 app.use('/api/analyze', analyzeRoutes);
 app.use('/api/flashcards', flashcardRoutes);
+app.use('/api/exam', examRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -43,7 +45,15 @@ app.listen(PORT, () => {
   console.log(`📚 API endpoints:`);
   console.log(`   - POST /api/quiz/generate`);
   console.log(`   - POST /api/analyze/pdf`);
+  console.log(`   - POST /api/analyze/pdf/glossary`);
+  console.log(`   - POST /api/analyze/pdf/ask`);
+  console.log(`   - POST /api/analyze/pdf/mindmap`);
+  console.log(`   - POST /api/analyze/pdf/ingest`);
+  console.log(`   - GET  /api/analyze/pdf/ingest/status`);
   console.log(`   - POST /api/flashcards/generate`);
+  console.log(`   - POST /api/exam/generate`);
+  console.log(`   - GET  /api/exam/:id`);
+  console.log(`   - POST /api/exam/:id/submit`);
   console.log(`   - GET  /api/health`);
   
   if (!process.env.GEMINI_API_KEY) {

@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard';
 import PDFViewerPage from './pages/PDFViewerPage';
 import QuizPage from './pages/QuizPage';
 import FlashcardPage from './pages/FlashcardPage';
+import ExamPage from './pages/ExamPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -58,6 +59,14 @@ function App() {
                   <FlashcardPage mode="deck" />
                 </ProtectedRoute>
               } 
+            />
+            <Route
+              path="/exam/:id"
+              element={
+                <ProtectedRoute>
+                  <ExamPage />
+                </ProtectedRoute>
+              }
             />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

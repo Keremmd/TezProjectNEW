@@ -28,13 +28,18 @@ import {
   Lock,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Trash2,
   Sun,
   Moon,
   MessageCircle,
   ImagePlus,
   Send,
-  Layers
+  Layers,
+  GraduationCap,
+  FileCheck2,
+  Timer,
+  Loader
 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -159,6 +164,27 @@ const Dashboard = () => {
   const [deleteDeckModalOpen, setDeleteDeckModalOpen] = useState(false);
   const [deckToDelete, setDeckToDelete] = useState(null);
   const [deletingDeck, setDeletingDeck] = useState(false);
+
+  // ---- Exam Simulator state ----
+  const [exams, setExams] = useState([]);
+  const [loadingExams, setLoadingExams] = useState(false);
+  const [generatingExam, setGeneratingExam] = useState(false);
+  const [examError, setExamError] = useState(null);
+  const [examForm, setExamForm] = useState({
+    title: '',
+    pdfIds: [],
+    durationMinutes: 60,
+    language: 'Turkish',
+    sections: [
+      { name: 'Çoktan Seçmeli', type: 'mcq', count: 10, difficulty: 'medium', points_per_question: 2 },
+      { name: 'Doğru/Yanlış', type: 'true_false', count: 5, difficulty: 'easy', points_per_question: 1 },
+      { name: 'Boşluk Doldurma', type: 'cloze', count: 5, difficulty: 'medium', points_per_question: 2 },
+      { name: 'Klasik', type: 'open', count: 3, difficulty: 'hard', points_per_question: 10 }
+    ]
+  });
+  const [deleteExamModalOpen, setDeleteExamModalOpen] = useState(false);
+  const [examToDelete, setExamToDelete] = useState(null);
+  const [examFormOpen, setExamFormOpen] = useState(false);
 
   // Load user profile data when user changes
   useEffect(() => {
@@ -817,6 +843,146 @@ const Dashboard = () => {
       loadPdfDecks();
     }
   }, [user, activeSection]);
+
+  // ---- Exam Simulator: load exams ----
+  const loadExams = async () => {
+    if (!user) return;
+    setLoadingExams(true);
+    try {
+      const { data, error } = await supabase
+        .from('exams')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setExams(data || []);
+    } catch (err) {
+      console.error('Error loading exams:', err);
+    } finally {
+      setLoadingExams(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user && activeSection === 'exams') {
+      loadExams();
+    }
+  }, [user, activeSection]);
+
+  const toggleExamPdf = (pdfId) => {
+    setExamForm((prev) => ({
+      ...prev,
+      pdfIds: prev.pdfIds.includes(pdfId)
+        ? prev.pdfIds.filter((id) => id !== pdfId)
+        : [...prev.pdfIds, pdfId],
+    }));
+  };
+
+  const updateExamSection = (index, updates) => {
+    setExamForm((prev) => ({
+      ...prev,
+      sections: prev.sections.map((s, i) => (i === index ? { ...s, ...updates } : s)),
+    }));
+  };
+
+  const addExamSection = () => {
+    setExamForm((prev) => ({
+      ...prev,
+      sections: [
+        ...prev.sections,
+        { name: 'Yeni Bölüm', type: 'mcq', count: 5, difficulty: 'medium', points_per_question: 2 },
+      ],
+    }));
+  };
+
+  const removeExamSection = (index) => {
+    setExamForm((prev) => ({
+      ...prev,
+      sections: prev.sections.filter((_, i) => i !== index),
+    }));
+  };
+
+  const totalExamQuestions = examForm.sections.reduce(
+    (sum, s) => sum + (Number(s.count) || 0),
+    0
+  );
+  const totalExamPoints = examForm.sections.reduce(
+    (sum, s) => sum + (Number(s.count) || 0) * (Number(s.points_per_question) || 0),
+    0
+  );
+
+  const handleGenerateExam = async () => {
+    if (!user) return;
+    setExamError(null);
+    const trimmedTitle = examForm.title.trim();
+    if (!trimmedTitle) {
+      setExamError('Sınav başlığı zorunludur.');
+      return;
+    }
+    if (examForm.pdfIds.length === 0) {
+      setExamError('En az bir PDF seçmelisin.');
+      return;
+    }
+    const hasQuestions = examForm.sections.some((s) => Number(s.count) > 0);
+    if (!hasQuestions) {
+      setExamError('En az bir bölümde soru sayısı 0\'dan büyük olmalı.');
+      return;
+    }
+
+    setGeneratingExam(true);
+    try {
+      const response = await fetch('http://localhost:3001/api/exam/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          title: trimmedTitle,
+          pdfIds: examForm.pdfIds,
+          language: language === 'tr' ? 'Turkish' : 'English',
+          durationMinutes: examForm.durationMinutes || null,
+          sections: examForm.sections
+            .filter((s) => Number(s.count) > 0)
+            .map((s) => ({
+              name: s.name,
+              type: s.type,
+              count: Number(s.count),
+              difficulty: s.difficulty,
+              points_per_question: Number(s.points_per_question),
+            })),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || data.error || 'Sınav üretilemedi');
+      }
+      await loadExams();
+      setExamForm((prev) => ({ ...prev, title: '', pdfIds: [] }));
+      navigate(`/exam/${data.exam.id}`);
+    } catch (err) {
+      console.error('Exam generation error:', err);
+      setExamError(err.message || 'Sınav üretilemedi');
+    } finally {
+      setGeneratingExam(false);
+    }
+  };
+
+  const confirmDeleteExam = async () => {
+    if (!examToDelete) return;
+    try {
+      const { error } = await supabase
+        .from('exams')
+        .delete()
+        .eq('id', examToDelete.id)
+        .eq('user_id', user.id);
+      if (error) throw error;
+      setExams((prev) => prev.filter((e) => e.id !== examToDelete.id));
+    } catch (err) {
+      console.error('Error deleting exam:', err);
+    } finally {
+      setDeleteExamModalOpen(false);
+      setExamToDelete(null);
+    }
+  };
 
   const handleDeleteDeck = (deck, e) => {
     if (e) {
@@ -1913,6 +2079,7 @@ const Dashboard = () => {
     { id: 'courses', icon: BookOpen, label: t('nav_my_courses') },
     { id: 'quizzes', icon: Brain, label: t('nav_my_quizzes') },
     { id: 'flashcards', icon: Layers, label: t('nav_flashcards') },
+    { id: 'exams', icon: GraduationCap, label: t('nav_exam_simulator') },
     { id: 'shared', icon: Share2, label: t('nav_shared_content') },
     { id: 'community', icon: MessageCircle, label: t('nav_community') },
     { id: 'settings', icon: Settings, label: t('nav_settings') },
@@ -3351,6 +3518,331 @@ const Dashboard = () => {
                     </div>
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {activeSection === 'exams' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                    {t('section_exam_simulator_title')}
+                  </h1>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    {t('section_exam_simulator_subtitle')}
+                  </p>
+                </div>
+              </div>
+
+              {/* Generator card (collapsible) */}
+              <div className="bg-white dark:bg-zinc-900 border-2 border-gray-300 dark:border-zinc-700 rounded-2xl overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setExamFormOpen((v) => !v)}
+                  className="w-full flex items-center justify-between gap-3 px-6 py-4 hover:bg-gray-50 dark:hover:bg-zinc-800/50 transition-colors"
+                  aria-expanded={examFormOpen}
+                >
+                  <div className="flex items-center gap-2">
+                    <GraduationCap className="w-5 h-5 text-purple-500" />
+                    <h2 className="text-lg font-bold text-gray-900 dark:text-white">
+                      {t('exam_new_title')}
+                    </h2>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {!examFormOpen && (
+                      <span className="text-xs text-gray-500 dark:text-gray-400 hidden sm:inline">
+                        {t('exam_open_form_hint')}
+                      </span>
+                    )}
+                    <ChevronDown
+                      className={`w-5 h-5 text-gray-500 transition-transform ${
+                        examFormOpen ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </div>
+                </button>
+                {examFormOpen && (
+                <div className="px-6 pb-6 pt-4 space-y-6 border-t border-gray-200 dark:border-zinc-800">
+
+                {/* Title & duration */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">
+                      {t('exam_field_title')}
+                    </label>
+                    <input
+                      type="text"
+                      value={examForm.title}
+                      onChange={(e) => setExamForm((p) => ({ ...p, title: e.target.value }))}
+                      placeholder={t('exam_field_title_placeholder')}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">
+                      {t('exam_field_duration')}
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={600}
+                      value={examForm.durationMinutes ?? ''}
+                      onChange={(e) =>
+                        setExamForm((p) => ({
+                          ...p,
+                          durationMinutes: e.target.value === '' ? null : Number(e.target.value),
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+                </div>
+
+                {/* PDF multi-select */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-200 mb-2">
+                    {t('exam_field_pdfs')}{' '}
+                    <span className="text-gray-500">
+                      ({examForm.pdfIds.length} {t('exam_selected')})
+                    </span>
+                  </label>
+                  {userPDFs.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {t('exam_no_pdfs')}
+                    </p>
+                  ) : (
+                    <div className="max-h-56 overflow-y-auto border border-gray-200 dark:border-zinc-700 rounded-lg divide-y divide-gray-200 dark:divide-zinc-800">
+                      {userPDFs.map((p) => {
+                        const checked = examForm.pdfIds.includes(p.id);
+                        return (
+                          <label
+                            key={p.id}
+                            className={`flex items-center gap-3 px-3 py-2 text-sm cursor-pointer ${
+                              checked
+                                ? 'bg-purple-50 dark:bg-purple-900/20'
+                                : 'hover:bg-gray-50 dark:hover:bg-zinc-800'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleExamPdf(p.id)}
+                              className="rounded border-gray-300 text-purple-500 focus:ring-purple-500"
+                            />
+                            <FileText className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                            <span className="flex-1 text-gray-900 dark:text-white truncate">
+                              {p.file_name}
+                            </span>
+                            {p.course_name && (
+                              <span className="text-[11px] text-gray-500">
+                                {p.course_name}
+                              </span>
+                            )}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Sections */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                      {t('exam_field_sections')}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={addExamSection}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-purple-600 hover:text-purple-700"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      {t('exam_add_section')}
+                    </button>
+                  </div>
+                  <div className="space-y-3">
+                    {examForm.sections.map((section, idx) => (
+                      <div
+                        key={idx}
+                        className="rounded-xl border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-900/60 p-3"
+                      >
+                        <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
+                          <input
+                            type="text"
+                            value={section.name}
+                            onChange={(e) => updateExamSection(idx, { name: e.target.value })}
+                            className="md:col-span-2 px-2 py-1.5 rounded-md border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-gray-900 dark:text-white"
+                            placeholder={t('exam_section_name')}
+                          />
+                          <select
+                            value={section.type}
+                            onChange={(e) => updateExamSection(idx, { type: e.target.value })}
+                            className="px-2 py-1.5 rounded-md border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-gray-900 dark:text-white"
+                          >
+                            <option value="mcq">{t('exam_type_mcq')}</option>
+                            <option value="open">{t('exam_type_open')}</option>
+                            <option value="cloze">{t('exam_type_cloze')}</option>
+                            <option value="true_false">{t('exam_type_tf')}</option>
+                            <option value="short">{t('exam_type_short')}</option>
+                          </select>
+                          <select
+                            value={section.difficulty}
+                            onChange={(e) => updateExamSection(idx, { difficulty: e.target.value })}
+                            className="px-2 py-1.5 rounded-md border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-gray-900 dark:text-white"
+                          >
+                            <option value="easy">{t('exam_difficulty_easy')}</option>
+                            <option value="medium">{t('exam_difficulty_medium')}</option>
+                            <option value="hard">{t('exam_difficulty_hard')}</option>
+                          </select>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] text-gray-500 uppercase">#</span>
+                            <input
+                              type="number"
+                              min={0}
+                              max={30}
+                              value={section.count}
+                              onChange={(e) =>
+                                updateExamSection(idx, { count: Number(e.target.value) })
+                              }
+                              className="w-full px-2 py-1.5 rounded-md border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-gray-900 dark:text-white"
+                            />
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] text-gray-500 uppercase">pts</span>
+                            <input
+                              type="number"
+                              min={1}
+                              max={50}
+                              value={section.points_per_question}
+                              onChange={(e) =>
+                                updateExamSection(idx, {
+                                  points_per_question: Number(e.target.value),
+                                })
+                              }
+                              className="w-full px-2 py-1.5 rounded-md border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-gray-900 dark:text-white"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeExamSection(idx)}
+                              className="p-1 text-gray-400 hover:text-red-500"
+                              aria-label="Remove section"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Totals & action */}
+                <div className="flex items-center justify-between flex-wrap gap-3 pt-2 border-t border-gray-200 dark:border-zinc-800">
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                    {t('exam_summary_total')}:{' '}
+                    <span className="font-semibold text-gray-900 dark:text-white">
+                      {totalExamQuestions}
+                    </span>{' '}
+                    {t('exam_summary_questions')} ·{' '}
+                    <span className="font-semibold text-gray-900 dark:text-white">
+                      {totalExamPoints}
+                    </span>{' '}
+                    {t('exam_summary_points')}
+                    {examForm.durationMinutes ? ` · ${examForm.durationMinutes} ${t('exam_summary_minutes')}` : ''}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {examError && (
+                      <span className="text-xs text-red-500 dark:text-red-400">{examError}</span>
+                    )}
+                    <button
+                      type="button"
+                      disabled={generatingExam}
+                      onClick={handleGenerateExam}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold text-sm hover:opacity-90 disabled:opacity-50"
+                    >
+                      {generatingExam ? (
+                        <>
+                          <Loader className="w-4 h-4 animate-spin" />
+                          {t('exam_generating')}
+                        </>
+                      ) : (
+                        <>
+                          <FileCheck2 className="w-4 h-4" />
+                          {t('exam_generate')}
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                </div>
+                )}
+              </div>
+
+              {/* Existing exams list */}
+              <div>
+                <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-3">
+                  {t('exam_history_title')}
+                </h2>
+                {loadingExams ? (
+                  <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-sm">
+                    <Loader className="w-4 h-4 animate-spin" />
+                    {t('loading')}
+                  </div>
+                ) : exams.length === 0 ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {t('exam_history_empty')}
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {exams.map((exam) => (
+                      <div
+                        key={exam.id}
+                        className="group relative bg-white dark:bg-zinc-900 border-2 border-gray-200 dark:border-zinc-700 rounded-2xl p-5 hover:border-purple-500 transition-colors cursor-pointer"
+                        onClick={() => navigate(`/exam/${exam.id}`)}
+                      >
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                            <GraduationCap className="w-5 h-5 text-white" />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExamToDelete(exam);
+                              setDeleteExamModalOpen(true);
+                            }}
+                            className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <h3 className="font-bold text-gray-900 dark:text-white text-sm mb-1 line-clamp-2">
+                          {exam.title}
+                        </h3>
+                        <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 mt-2">
+                          <span className="flex items-center gap-1">
+                            <FileCheck2 className="w-3.5 h-3.5" />
+                            {exam.total_points} pts
+                          </span>
+                          {exam.duration_minutes && (
+                            <span className="flex items-center gap-1">
+                              <Timer className="w-3.5 h-3.5" />
+                              {exam.duration_minutes} dk
+                            </span>
+                          )}
+                          <span className="flex items-center gap-1">
+                            <FileText className="w-3.5 h-3.5" />
+                            {Array.isArray(exam.pdf_ids) ? exam.pdf_ids.length : 0} PDF
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-3">
+                          {new Date(exam.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -5118,6 +5610,48 @@ const Dashboard = () => {
       )}
 
       {/* Delete PDF deck modal */}
+      {deleteExamModalOpen && examToDelete && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border-2 border-zinc-800 rounded-2xl p-8 max-w-md w-full"
+          >
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-2">
+                {t('exam_delete_title')}
+              </h3>
+              <p className="text-gray-400">
+                <span className="font-semibold text-white">"{examToDelete.title}"</span>
+              </p>
+              <p className="text-sm text-gray-500 mt-2">
+                {t('exam_delete_warning')}
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setDeleteExamModalOpen(false);
+                  setExamToDelete(null);
+                }}
+                className="flex-1 px-6 py-3 bg-zinc-800 text-white rounded-xl font-semibold hover:bg-zinc-700 transition-colors"
+              >
+                {t('cancel')}
+              </button>
+              <button
+                onClick={confirmDeleteExam}
+                className="flex-1 px-6 py-3 bg-red-500 text-white rounded-xl font-semibold hover:bg-red-600 transition-colors"
+              >
+                {t('delete')}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
       {deleteDeckModalOpen && deckToDelete && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <motion.div

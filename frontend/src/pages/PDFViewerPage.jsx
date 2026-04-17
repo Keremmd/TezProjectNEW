@@ -11,10 +11,13 @@ import {
   ZoomOut,
   Download,
   X,
-  Loader
+  Loader,
+  Network,
+  Maximize2
 } from 'lucide-react';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
+import MindMap from '../components/MindMap';
 
 // Set up PDF.js worker - matching version
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@4.8.69/build/pdf.worker.min.mjs`;
@@ -37,11 +40,15 @@ const PDFViewerPage = () => {
   const [pdfNotes, setPdfNotes] = useState('');
   const [notesLoaded, setNotesLoaded] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
-  const [activeRightTab, setActiveRightTab] = useState('chat'); // 'chat' | 'glossary' | 'highlights'
+  const [activeRightTab, setActiveRightTab] = useState('chat'); // 'chat' | 'glossary' | 'highlights' | 'mindmap'
   const [glossaryTerms, setGlossaryTerms] = useState([]);
   const [glossaryLoaded, setGlossaryLoaded] = useState(false);
   const [glossaryLoading, setGlossaryLoading] = useState(false);
   const [glossaryError, setGlossaryError] = useState(null);
+  const [mindmap, setMindmap] = useState(null);
+  const [mindmapLoading, setMindmapLoading] = useState(false);
+  const [mindmapError, setMindmapError] = useState(null);
+  const [mindmapFullscreen, setMindmapFullscreen] = useState(false);
   const [bookmarks, setBookmarks] = useState([]);
   const [showBookmarkModal, setShowBookmarkModal] = useState(false);
   const [bookmarkLabel, setBookmarkLabel] = useState('');
@@ -234,35 +241,91 @@ const PDFViewerPage = () => {
     }
   }, [glossaryTerms, pdf]);
 
-  // Load highlights for this PDF
+  // Load highlights for this PDF from Supabase (per-user), with a
+  // one-time migration from any existing localStorage copy.
   useEffect(() => {
-    if (!pdf) return;
-    const keyBase = pdf.file_path || pdf.file_name || pdf.id;
-    const storageKey = `pdf_highlights_${keyBase}`;
-    try {
-      const raw = window.localStorage.getItem(storageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          setHighlights(parsed);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load PDF highlights from localStorage:', e);
-    }
-  }, [pdf]);
+    if (!pdf || !user) return;
+    let cancelled = false;
 
-  // Persist highlights whenever they change
-  useEffect(() => {
-    if (!pdf) return;
-    const keyBase = pdf.file_path || pdf.file_name || pdf.id;
-    const storageKey = `pdf_highlights_${keyBase}`;
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify(highlights));
-    } catch (e) {
-      console.error('Failed to save PDF highlights to localStorage:', e);
-    }
-  }, [highlights, pdf]);
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('pdf_highlights')
+          .select('id, page, text, note, created_at')
+          .eq('pdf_id', pdf.id)
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: true });
+
+        if (cancelled) return;
+
+        if (error) {
+          console.error('Failed to load highlights from Supabase:', error);
+          return;
+        }
+
+        const remote = (data || []).map((h) => ({
+          id: h.id,
+          page: h.page,
+          text: h.text || '',
+          note: h.note || '',
+          createdAt: h.created_at,
+        }));
+
+        // One-time migration: if the DB is empty but we have highlights in
+        // localStorage from older sessions, push them up then clear the key.
+        const keyBase = pdf.file_path || pdf.file_name || pdf.id;
+        const storageKey = `pdf_highlights_${keyBase}`;
+        if (remote.length === 0) {
+          try {
+            const raw = window.localStorage.getItem(storageKey);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                const rows = parsed
+                  .filter((h) => h && Number.isFinite(h.page))
+                  .map((h) => ({
+                    pdf_id: pdf.id,
+                    user_id: user.id,
+                    page: h.page,
+                    text: h.text || null,
+                    note: h.note || null,
+                    created_at: h.createdAt || new Date().toISOString(),
+                  }));
+                if (rows.length > 0) {
+                  const { data: inserted, error: insErr } = await supabase
+                    .from('pdf_highlights')
+                    .insert(rows)
+                    .select('id, page, text, note, created_at');
+                  if (!insErr && inserted) {
+                    const migrated = inserted.map((h) => ({
+                      id: h.id,
+                      page: h.page,
+                      text: h.text || '',
+                      note: h.note || '',
+                      createdAt: h.created_at,
+                    }));
+                    setHighlights(migrated);
+                    window.localStorage.removeItem(storageKey);
+                    return;
+                  }
+                }
+              }
+            }
+          } catch (migErr) {
+            console.warn('Highlight migration skipped:', migErr);
+          }
+        }
+
+        setHighlights(remote);
+      } catch (e) {
+        console.error('Failed to load PDF highlights:', e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pdf, user]);
 
   const onDocumentLoadSuccess = ({ numPages }) => {
     setNumPages(numPages);
@@ -317,6 +380,100 @@ const PDFViewerPage = () => {
     }
   };
 
+  const handleGenerateMindMap = async ({ force = false } = {}) => {
+    if (!pdf || mindmapLoading) return;
+    setMindmapLoading(true);
+    setMindmapError(null);
+    try {
+      const response = await fetch('http://localhost:3001/api/analyze/pdf/mindmap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pdfId: pdf.id,
+          language: language === 'tr' ? 'Turkish' : 'English',
+          force,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Failed to generate mindmap');
+      }
+      setMindmap(data.mindmap);
+    } catch (err) {
+      console.error('MindMap error:', err);
+      setMindmapError(err.message || 'Failed to generate mindmap');
+    } finally {
+      setMindmapLoading(false);
+    }
+  };
+
+  // Load a cached mindmap (if any) as soon as the PDF is ready.
+  // Uses the cache-only GET endpoint so we never trigger an AI call here.
+  useEffect(() => {
+    let cancelled = false;
+    if (!pdf?.id) return;
+    (async () => {
+      try {
+        const resp = await fetch(
+          `http://localhost:3001/api/analyze/pdf/mindmap?pdfId=${encodeURIComponent(pdf.id)}`
+        );
+        const data = await resp.json();
+        if (cancelled) return;
+        if (resp.ok && data?.success && data.cached && data.mindmap) {
+          setMindmap(data.mindmap);
+        }
+      } catch (err) {
+        console.warn('MindMap cache preload failed:', err.message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pdf?.id]);
+
+  // Background RAG ingestion: chunk + embed this PDF so Q&A uses vector
+  // retrieval instead of a truncated prefix. Runs once per PDF open; the
+  // backend no-ops if the PDF is already indexed.
+  useEffect(() => {
+    let cancelled = false;
+    if (!pdf?.id) return;
+    (async () => {
+      try {
+        const statusResp = await fetch(
+          `http://localhost:3001/api/analyze/pdf/ingest/status?pdfId=${encodeURIComponent(pdf.id)}`
+        );
+        const status = await statusResp.json();
+        if (cancelled) return;
+        if (status?.indexed) return;
+        console.log('🔍 [RAG] PDF not indexed, ingesting in background...');
+        const resp = await fetch(
+          'http://localhost:3001/api/analyze/pdf/ingest',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pdfId: pdf.id }),
+          }
+        );
+        const data = await resp.json();
+        if (!cancelled && data?.success) {
+          console.log(`✅ [RAG] Indexed ${data.chunks} chunks`);
+        }
+      } catch (err) {
+        console.warn('RAG background ingest failed:', err.message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pdf?.id]);
+
+  const handleMindMapNodeClick = (nodeData) => {
+    if (!nodeData?.page || !numPages) return;
+    const target = Math.max(1, Math.min(numPages, Number(nodeData.page)));
+    setPageNumber(target);
+    if (mindmapFullscreen) setMindmapFullscreen(false);
+  };
+
   const clearSelectionMenu = () => {
     setSelectionMenu(null);
   };
@@ -350,26 +507,51 @@ const PDFViewerPage = () => {
     });
   };
 
-  const handleCreateHighlight = () => {
+  const persistHighlight = async ({ page, text, note }) => {
+    if (!pdf || !user) return null;
+    try {
+      const { data, error } = await supabase
+        .from('pdf_highlights')
+        .insert({
+          pdf_id: pdf.id,
+          user_id: user.id,
+          page,
+          text: text || null,
+          note: note || null,
+        })
+        .select('id, page, text, note, created_at')
+        .single();
+      if (error) {
+        console.error('Failed to save highlight to Supabase:', error);
+        return null;
+      }
+      return {
+        id: data.id,
+        page: data.page,
+        text: data.text || '',
+        note: data.note || '',
+        createdAt: data.created_at,
+      };
+    } catch (e) {
+      console.error('Failed to save highlight:', e);
+      return null;
+    }
+  };
+
+  const handleCreateHighlight = async () => {
     if (!selectionMenu) return;
     const { text, page } = selectionMenu;
     const snippet = text.length > 220 ? `${text.slice(0, 220)}…` : text;
-    setHighlights(prev => [
-      ...prev,
-      {
-        id: `h-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        page,
-        text: snippet,
-        note: '',
-        createdAt: new Date().toISOString()
-      }
-    ]);
     clearSelectionMenu();
     try {
       const sel = window.getSelection();
       if (sel) sel.removeAllRanges();
     } catch {
       // ignore
+    }
+    const saved = await persistHighlight({ page, text: snippet, note: '' });
+    if (saved) {
+      setHighlights((prev) => [...prev, saved]);
     }
   };
 
@@ -404,30 +586,21 @@ const PDFViewerPage = () => {
     clearSelectionMenu();
   };
 
-  const handleConfirmHighlightNote = () => {
+  const handleConfirmHighlightNote = async () => {
     if (!highlightNoteModal.open) return;
     const text = (highlightNoteModal.text || '').trim();
     const note = (highlightNoteModal.note || '').trim();
     if (!text && !note) {
-      setHighlightNoteModal(prev => ({ ...prev, open: false }));
+      setHighlightNoteModal((prev) => ({ ...prev, open: false }));
       return;
     }
     const snippet = text.length > 220 ? `${text.slice(0, 220)}…` : text || note;
-    setHighlights(prev => [
-      ...prev,
-      {
-        id: `h-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        page: highlightNoteModal.page,
-        text: snippet,
-        note,
-        createdAt: new Date().toISOString()
-      }
-    ]);
+    const page = highlightNoteModal.page;
     setHighlightNoteModal({
       open: false,
       text: '',
       note: '',
-      page: 1
+      page: 1,
     });
     try {
       const sel = window.getSelection();
@@ -435,10 +608,30 @@ const PDFViewerPage = () => {
     } catch {
       // ignore
     }
+    const saved = await persistHighlight({ page, text: snippet, note });
+    if (saved) {
+      setHighlights((prev) => [...prev, saved]);
+    }
   };
 
-  const handleRemoveHighlight = (id) => {
-    setHighlights(prev => prev.filter(h => h.id !== id));
+  const handleRemoveHighlight = async (id) => {
+    const previous = highlights;
+    setHighlights((prev) => prev.filter((h) => h.id !== id));
+    if (!pdf || !user) return;
+    try {
+      const { error } = await supabase
+        .from('pdf_highlights')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user.id);
+      if (error) {
+        console.error('Failed to delete highlight:', error);
+        setHighlights(previous);
+      }
+    } catch (e) {
+      console.error('Failed to delete highlight:', e);
+      setHighlights(previous);
+    }
   };
 
   const openBookmarkModal = () => {
@@ -498,7 +691,9 @@ const PDFViewerPage = () => {
       const aiMessage = {
         id: `ai-${Date.now()}`,
         sender: 'ai',
-        text: data.answer || 'Üzgünüm, şu anda bu soruya yanıt veremedim.'
+        text: data.answer || 'Üzgünüm, şu anda bu soruya yanıt veremedim.',
+        sources: Array.isArray(data.rag?.pages) ? data.rag.pages : [],
+        ragUsed: !!data.rag?.used,
       };
       setChatMessages(prev => [...prev, aiMessage]);
     } catch (err) {
@@ -613,9 +808,9 @@ const PDFViewerPage = () => {
           </div>
 
           {/* Right Side - AI Chat + Glossary + Notes + Highlights */}
-          <div className="w-[480px] flex flex-col max-h-[calc(100vh-200px)]">
+          <div className="w-[480px] flex flex-col h-[calc(100vh-200px)]">
             {/* Chat / Glossary Card */}
-            <div className="flex flex-col bg-white dark:bg-zinc-900 border-2 border-gray-300 dark:border-zinc-700 rounded-2xl overflow-hidden flex-1">
+            <div className="flex flex-col bg-white dark:bg-zinc-900 border-2 border-gray-300 dark:border-zinc-700 rounded-2xl overflow-hidden flex-1 min-h-0">
               {/* Chat Header */}
               <div className="p-6 border-b border-gray-200 dark:border-zinc-800 flex items-start justify-between gap-4">
                 <div>
@@ -624,6 +819,8 @@ const PDFViewerPage = () => {
                       ? t('pdf_ai_title')
                       : activeRightTab === 'glossary'
                       ? 'Glossary'
+                      : activeRightTab === 'mindmap'
+                      ? t('mindmap_title')
                       : 'Highlights'}
                   </h2>
                   {activeRightTab === 'chat' && (
@@ -634,6 +831,11 @@ const PDFViewerPage = () => {
                   {activeRightTab === 'glossary' && (
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       Important terms and definitions extracted from this PDF.
+                    </p>
+                  )}
+                  {activeRightTab === 'mindmap' && (
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {t('mindmap_subtitle')}
                     </p>
                   )}
                   {activeRightTab === 'highlights' && (
@@ -665,6 +867,18 @@ const PDFViewerPage = () => {
                       }`}
                     >
                       Glossary
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveRightTab('mindmap')}
+                      className={`px-3 py-1 rounded-full font-medium inline-flex items-center gap-1 ${
+                        activeRightTab === 'mindmap'
+                          ? 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-white shadow-sm'
+                          : 'text-gray-600 dark:text-gray-300'
+                      }`}
+                    >
+                      <Network className="w-3.5 h-3.5" />
+                      {t('mindmap_tab')}
                     </button>
                     <button
                       type="button"
@@ -715,7 +929,30 @@ const PDFViewerPage = () => {
                               : 'bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-gray-300'
                           }`}
                         >
-                          <p>{msg.text}</p>
+                          <p className="whitespace-pre-wrap">{msg.text}</p>
+                          {msg.sender === 'ai' && msg.ragUsed && msg.sources && msg.sources.length > 0 && (
+                            <div className="mt-2 pt-2 border-t border-gray-200 dark:border-zinc-700 flex flex-wrap items-center gap-1.5">
+                              <span className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                Kaynak:
+                              </span>
+                              {msg.sources.map((page) => (
+                                <button
+                                  key={page}
+                                  type="button"
+                                  onClick={() => {
+                                    if (numPages) {
+                                      setPageNumber(
+                                        Math.max(1, Math.min(numPages, Number(page)))
+                                      );
+                                    }
+                                  }}
+                                  className="text-[11px] px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-300 hover:bg-blue-500/20 font-medium"
+                                >
+                                  s.{page}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -821,6 +1058,80 @@ const PDFViewerPage = () => {
                 </div>
               )}
 
+              {activeRightTab === 'mindmap' && (
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  {mindmapLoading && (
+                    <div className="flex items-center justify-center py-6 text-sm text-gray-600 dark:text-gray-300">
+                      <Loader className="w-5 h-5 mr-2 animate-spin" />
+                      <span>{t('mindmap_loading')}</span>
+                    </div>
+                  )}
+                  {!mindmapLoading && !mindmap && !mindmapError && (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center text-sm text-gray-600 dark:text-gray-300 gap-4 p-6">
+                      <Network className="w-10 h-10 text-gray-400 dark:text-gray-500" />
+                      <p>{t('mindmap_empty')}</p>
+                      <button
+                        type="button"
+                        onClick={() => handleGenerateMindMap()}
+                        className="px-5 py-2 rounded-lg bg-gray-900 text-white dark:bg-white dark:text-black text-sm font-semibold hover:opacity-90"
+                      >
+                        {t('mindmap_generate')}
+                      </button>
+                    </div>
+                  )}
+                  {mindmapError && !mindmapLoading && (
+                    <div className="p-6 text-sm text-red-500 dark:text-red-400">
+                      {mindmapError}
+                      <div className="mt-3">
+                        <button
+                          type="button"
+                          onClick={() => handleGenerateMindMap()}
+                          className="px-4 py-1.5 rounded-lg border border-gray-300 dark:border-zinc-700 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-zinc-800"
+                        >
+                          {t('mindmap_retry')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {mindmap && !mindmapLoading && (
+                    <div className="flex-1 flex flex-col min-h-0">
+                      <div className="flex items-center justify-between gap-2 px-5 py-2 border-b border-gray-200 dark:border-zinc-800">
+                        <div className="text-xs text-gray-600 dark:text-gray-400 truncate">
+                          {mindmap.title}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setMindmapFullscreen(true)}
+                            className="inline-flex items-center gap-1 px-3 py-1 rounded-lg border border-gray-300 dark:border-zinc-700 text-[11px] font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-zinc-800"
+                          >
+                            <Maximize2 className="w-3 h-3" />
+                            {t('mindmap_fullscreen')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleGenerateMindMap({ force: true })}
+                            className="px-3 py-1 rounded-lg border border-gray-300 dark:border-zinc-700 text-[11px] font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-zinc-800"
+                          >
+                            {t('mindmap_regenerate')}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex-1 min-h-0">
+                        <MindMap
+                          mindmap={mindmap}
+                          onNodeClick={handleMindMapNodeClick}
+                          compact
+                        />
+                      </div>
+                      <div className="px-5 py-2 text-[11px] text-gray-500 dark:text-gray-400 border-t border-gray-200 dark:border-zinc-800">
+                        {t('mindmap_hint')}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {activeRightTab === 'highlights' && (
                 <div className="flex-1 flex flex-col p-6 overflow-y-auto space-y-3">
                   {highlights.length === 0 ? (
@@ -901,6 +1212,38 @@ const PDFViewerPage = () => {
           </div>
         </div>
       </div>
+
+      {/* Fullscreen MindMap Modal */}
+      {mindmapFullscreen && mindmap && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="w-full h-full max-w-[1400px] max-h-[900px] rounded-2xl bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 shadow-2xl flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-zinc-800">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900 dark:text-white">
+                  {mindmap.title}
+                </h2>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {t('mindmap_hint')}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMindmapFullscreen(false)}
+                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-600 dark:text-gray-300"
+                aria-label="Close mindmap"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0">
+              <MindMap
+                mindmap={mindmap}
+                onNodeClick={handleMindMapNodeClick}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Selection action menu for text highlights */}
       {selectionMenu && (

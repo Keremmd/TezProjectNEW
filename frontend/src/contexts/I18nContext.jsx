@@ -14,11 +14,51 @@ const MESSAGES = {
     nav_my_courses: 'My Courses',
     nav_my_quizzes: 'My Quizzes',
     nav_flashcards: 'Flashcards',
+    nav_exam_simulator: 'Exam Simulator',
     nav_shared_content: 'Shared Content',
     nav_community: 'Community',
     nav_settings: 'Settings',
     nav_logout: 'Logout',
     search_placeholder: 'Search PDFs or quizzes...',
+
+    // Common
+    loading: 'Loading...',
+    cancel: 'Cancel',
+    delete: 'Delete',
+
+    // Exam Simulator
+    section_exam_simulator_title: 'Exam Simulator',
+    section_exam_simulator_subtitle:
+      'Build a mixed exam paper from one or more PDFs. Multiple question types, timed, auto-graded.',
+    exam_new_title: 'Create a new exam',
+    exam_open_form_hint: 'Click to open',
+    exam_field_title: 'Exam title',
+    exam_field_title_placeholder: 'e.g., Midterm — Biology 101',
+    exam_field_duration: 'Duration (minutes, 0 = no limit)',
+    exam_field_pdfs: 'Source PDFs',
+    exam_selected: 'selected',
+    exam_no_pdfs: 'You have no PDFs yet. Upload one from "My PDFs" first.',
+    exam_field_sections: 'Sections',
+    exam_add_section: 'Add section',
+    exam_section_name: 'Section name',
+    exam_type_mcq: 'Multiple choice',
+    exam_type_open: 'Open-ended',
+    exam_type_cloze: 'Fill in the blank',
+    exam_type_tf: 'True / False',
+    exam_type_short: 'Short answer',
+    exam_difficulty_easy: 'Easy',
+    exam_difficulty_medium: 'Medium',
+    exam_difficulty_hard: 'Hard',
+    exam_summary_total: 'Total',
+    exam_summary_questions: 'questions',
+    exam_summary_points: 'points',
+    exam_summary_minutes: 'min',
+    exam_generate: 'Generate exam',
+    exam_generating: 'Generating...',
+    exam_history_title: 'Your exams',
+    exam_history_empty: 'No exams yet. Generate your first one above.',
+    exam_delete_title: 'Delete exam?',
+    exam_delete_warning: 'This will remove the exam and all its questions and attempts.',
 
     // Dashboard – quiz time limit
     quiz_time_limit_label: 'Time Limit (minutes)',
@@ -39,6 +79,20 @@ const MESSAGES = {
     pdf_ai_sending: 'Sending...',
     pdf_ai_error_generic:
       'Sorry, there was an error while answering this question. Please try again in a moment.',
+
+    // PDF viewer – Mind Map
+    mindmap_tab: 'Mind Map',
+    mindmap_title: 'Mind Map',
+    mindmap_subtitle:
+      'A concept map of this PDF. Click any node to jump to that page.',
+    mindmap_empty:
+      'Generate an interactive mind map of the topics in this PDF.',
+    mindmap_generate: 'Generate mind map',
+    mindmap_regenerate: 'Regenerate',
+    mindmap_retry: 'Try again',
+    mindmap_loading: 'Building a mind map from this PDF...',
+    mindmap_hint: 'Tip: Click a node to jump to its page. Drag to reorganize.',
+    mindmap_fullscreen: 'Fullscreen',
 
     // Quiz page – timer
     quiz_timer_remaining_suffix: 'left',
@@ -184,11 +238,51 @@ const MESSAGES = {
     nav_my_courses: 'Kurslarım',
     nav_my_quizzes: 'Quizlerim',
     nav_flashcards: 'Kartlar',
+    nav_exam_simulator: 'Sınav Simülatörü',
     nav_shared_content: 'Paylaşılan İçerik',
     nav_community: 'Topluluk',
     nav_settings: 'Ayarlar',
     nav_logout: 'Çıkış Yap',
     search_placeholder: 'PDF veya quiz ara...',
+
+    // Ortak
+    loading: 'Yükleniyor...',
+    cancel: 'İptal',
+    delete: 'Sil',
+
+    // Sınav Simülatörü
+    section_exam_simulator_title: 'Sınav Simülatörü',
+    section_exam_simulator_subtitle:
+      'Bir veya birden fazla PDF\'ten karışık bir sınav kağıdı oluştur. Farklı soru tipleri, süreli, otomatik puanlama.',
+    exam_new_title: 'Yeni sınav oluştur',
+    exam_open_form_hint: 'Açmak için tıkla',
+    exam_field_title: 'Sınav başlığı',
+    exam_field_title_placeholder: 'Örn: Vize — Biyoloji 101',
+    exam_field_duration: 'Süre (dk, 0 = sınırsız)',
+    exam_field_pdfs: 'Kaynak PDF\'ler',
+    exam_selected: 'seçildi',
+    exam_no_pdfs: 'Henüz PDF\'in yok. Önce "PDF\'lerim"den yükle.',
+    exam_field_sections: 'Bölümler',
+    exam_add_section: 'Bölüm ekle',
+    exam_section_name: 'Bölüm adı',
+    exam_type_mcq: 'Çoktan seçmeli',
+    exam_type_open: 'Klasik',
+    exam_type_cloze: 'Boşluk doldurma',
+    exam_type_tf: 'Doğru / Yanlış',
+    exam_type_short: 'Kısa cevap',
+    exam_difficulty_easy: 'Kolay',
+    exam_difficulty_medium: 'Orta',
+    exam_difficulty_hard: 'Zor',
+    exam_summary_total: 'Toplam',
+    exam_summary_questions: 'soru',
+    exam_summary_points: 'puan',
+    exam_summary_minutes: 'dk',
+    exam_generate: 'Sınav oluştur',
+    exam_generating: 'Oluşturuluyor...',
+    exam_history_title: 'Sınavların',
+    exam_history_empty: 'Henüz sınav yok. Yukarıdan ilkini oluştur.',
+    exam_delete_title: 'Sınavı sil?',
+    exam_delete_warning: 'Bu sınav, soruları ve tüm çözüm geçmişi silinecek.',
 
     // Dashboard – quiz time limit
     quiz_time_limit_label: 'Süre Sınırı (dakika)',
@@ -211,6 +305,21 @@ const MESSAGES = {
     pdf_ai_sending: 'Gönderiliyor...',
     pdf_ai_error_generic:
       'Üzgünüm, bu soruya yanıt verirken bir hata oluştu. Lütfen biraz sonra tekrar dene.',
+
+    // PDF viewer – Kavram Haritası
+    mindmap_tab: 'Harita',
+    mindmap_title: 'Kavram Haritası',
+    mindmap_subtitle:
+      'Bu PDF\'in kavram haritası. Bir düğüme tıklayarak ilgili sayfaya git.',
+    mindmap_empty:
+      'Bu PDF\'teki konuların interaktif kavram haritasını oluştur.',
+    mindmap_generate: 'Kavram haritası oluştur',
+    mindmap_regenerate: 'Yeniden oluştur',
+    mindmap_retry: 'Tekrar dene',
+    mindmap_loading: 'Bu PDF\'ten kavram haritası hazırlanıyor...',
+    mindmap_hint:
+      'İpucu: Bir düğüme tıklayarak sayfasına git. Sürükleyerek yeniden düzenleyebilirsin.',
+    mindmap_fullscreen: 'Tam ekran',
 
     // Quiz page – timer
     quiz_timer_remaining_suffix: 'kaldı',
