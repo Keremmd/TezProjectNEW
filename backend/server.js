@@ -5,6 +5,7 @@ import quizRoutes from './routes/quiz.js';
 import analyzeRoutes from './routes/analyze.js';
 import flashcardRoutes from './routes/flashcards.js';
 import examRoutes from './routes/exams.js';
+import leaderboardRoutes from './routes/leaderboard.js';
 
 dotenv.config();
 
@@ -21,6 +22,7 @@ app.use('/api/quiz', quizRoutes);
 app.use('/api/analyze', analyzeRoutes);
 app.use('/api/flashcards', flashcardRoutes);
 app.use('/api/exam', examRoutes);
+app.use('/api/leaderboard', leaderboardRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -54,6 +56,7 @@ app.listen(PORT, () => {
   console.log(`   - POST /api/exam/generate`);
   console.log(`   - GET  /api/exam/:id`);
   console.log(`   - POST /api/exam/:id/submit`);
+  console.log(`   - GET  /api/leaderboard`);
   console.log(`   - GET  /api/health`);
   
   if (!process.env.GEMINI_API_KEY) {

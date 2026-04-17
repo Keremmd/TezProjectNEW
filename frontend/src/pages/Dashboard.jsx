@@ -39,7 +39,10 @@ import {
   GraduationCap,
   FileCheck2,
   Timer,
-  Loader
+  Loader,
+  Trophy,
+  Medal,
+  Crown
 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -185,6 +188,15 @@ const Dashboard = () => {
   const [deleteExamModalOpen, setDeleteExamModalOpen] = useState(false);
   const [examToDelete, setExamToDelete] = useState(null);
   const [examFormOpen, setExamFormOpen] = useState(false);
+
+  // Submitted exam attempts (for learning points and "Exams Taken" stat)
+  const [examAttempts, setExamAttempts] = useState([]);
+
+  // ---- Leaderboard state ----
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [currentUserRank, setCurrentUserRank] = useState(null);
+  const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
 
   // Load user profile data when user changes
   useEffect(() => {
@@ -868,6 +880,58 @@ const Dashboard = () => {
       loadExams();
     }
   }, [user, activeSection]);
+
+  // ---- Load submitted exam attempts (for points + "Exams Taken" stat) ----
+  const loadExamAttempts = async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('exam_attempts')
+        .select('id, exam_id, auto_score, max_auto_score, submitted_at, ai_graded')
+        .eq('user_id', user.id)
+        .not('submitted_at', 'is', null);
+      if (error) throw error;
+      setExamAttempts(data || []);
+    } catch (err) {
+      console.error('Error loading exam attempts:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      loadExamAttempts();
+    }
+  }, [user, activeSection]);
+
+  // ---- Load leaderboard when home tab is active ----
+  const loadLeaderboard = async () => {
+    setLoadingLeaderboard(true);
+    try {
+      const params = new URLSearchParams({ limit: '10' });
+      if (user?.id) params.set('userId', user.id);
+      const res = await fetch(
+        `http://localhost:3001/api/leaderboard?${params.toString()}`
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || data.error || 'Failed to load leaderboard');
+      }
+      setLeaderboard(data.leaderboard || []);
+      setCurrentUserRank(data.currentUser || null);
+    } catch (err) {
+      console.error('Error loading leaderboard:', err);
+      setLeaderboard([]);
+      setCurrentUserRank(null);
+    } finally {
+      setLoadingLeaderboard(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user && leaderboardOpen) {
+      loadLeaderboard();
+    }
+  }, [user, leaderboardOpen]);
 
   const toggleExamPdf = (pdfId) => {
     setExamForm((prev) => ({
@@ -2004,38 +2068,50 @@ const Dashboard = () => {
     }
   };
 
-  // Mock data
   // Calculate user statistics
   const sharedPDFsCount = userPDFs.filter(pdf => pdf.privacy === 'public').length;
   const completedPDFsCount = userPDFs.filter(pdf => pdf.status === 'completed').length;
-  const learningPoints = (quizzes.length * 35) + (completedPDFsCount * 10);
+
+  // Exam-based points: 10 base points per submitted attempt + up to 50
+  // bonus points per attempt scaled by auto-graded accuracy.
+  const examAttemptsCount = examAttempts.length;
+  const examAccuracyPoints = examAttempts.reduce((sum, a) => {
+    if (!a.max_auto_score || a.max_auto_score <= 0) return sum;
+    return sum + Math.round((a.auto_score / a.max_auto_score) * 50);
+  }, 0);
+  const examPoints = examAttemptsCount * 10 + examAccuracyPoints;
+  const learningPoints =
+    quizzes.length * 35 + completedPDFsCount * 10 + examPoints;
 
   const stats = [
-    { 
-      icon: FileText, 
-      label: t('home_stat_total_pdfs_label'), 
-      value: userPDFs.length.toString(), 
+    {
+      icon: FileText,
+      label: t('home_stat_total_pdfs_label'),
+      value: userPDFs.length.toString(),
       change: t('home_stat_total_pdfs_change', { count: completedPDFsCount }),
       color: 'from-blue-500 to-blue-600'
     },
-    { 
-      icon: Brain, 
-      label: t('home_stat_quizzes_label'), 
-      value: quizzes.length.toString(), 
+    {
+      icon: Brain,
+      label: t('home_stat_quizzes_label'),
+      value: quizzes.length.toString(),
       change: t('home_stat_quizzes_change', { count: quizzes.length }),
       color: 'from-purple-500 to-purple-600'
     },
-    { 
-      icon: Users, 
-      label: t('home_stat_shared_label'), 
-      value: sharedPDFsCount.toString(), 
-      change: t('home_stat_shared_change', { count: sharedPDFsCount }),
-      color: 'from-green-500 to-green-600'
+    {
+      icon: GraduationCap,
+      label: t('home_stat_exams_label'),
+      value: examAttemptsCount.toString(),
+      change:
+        examAttemptsCount > 0
+          ? t('home_stat_exams_change', { count: examAttemptsCount })
+          : t('home_stat_exams_empty'),
+      color: 'from-pink-500 to-fuchsia-600'
     },
-    { 
-      icon: TrendingUp, 
-      label: t('home_stat_points_label'), 
-      value: learningPoints.toString(), 
+    {
+      icon: TrendingUp,
+      label: t('home_stat_points_label'),
+      value: learningPoints.toString(),
       change: t('home_stat_points_change'),
       color: 'from-orange-500 to-orange-600'
     },
@@ -2380,6 +2456,21 @@ const Dashboard = () => {
               >
                 {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
               </button>
+
+              {/* Leaderboard */}
+              <button
+                type="button"
+                onClick={() => setLeaderboardOpen(true)}
+                className="relative p-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-zinc-800 hover:text-yellow-500 transition-colors"
+                title={t('home_leaderboard_title')}
+              >
+                <Trophy className="w-5 h-5" />
+                {currentUserRank?.rank && currentUserRank.rank <= 3 && (
+                  <span className="absolute -top-1 -right-1 text-[10px] font-bold w-4 h-4 rounded-full bg-yellow-500 text-white flex items-center justify-center">
+                    {currentUserRank.rank}
+                  </span>
+                )}
+              </button>
               <button 
                 onClick={() => {
                   console.log('Home button clicked');
@@ -2505,6 +2596,8 @@ const Dashboard = () => {
                   </p>
                 </motion.div>
               </div>
+
+              {/* Leaderboard lives in a top-bar popup (Trophy button) */}
 
               {/* Recent PDFs */}
               <div>
@@ -5647,6 +5740,211 @@ const Dashboard = () => {
               >
                 {t('delete')}
               </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Leaderboard popup */}
+      {leaderboardOpen && (
+        <div
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-16"
+          onClick={() => setLeaderboardOpen(false)}
+        >
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.97 }}
+            transition={{ duration: 0.2 }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[calc(100vh-8rem)] flex flex-col overflow-hidden"
+          >
+            {/* Header */}
+            <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-gray-200 dark:border-zinc-800">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center shadow-lg shadow-yellow-500/30">
+                  <Trophy className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                    {t('home_leaderboard_title')}
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {t('home_leaderboard_subtitle')}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {currentUserRank && (
+                  <div className="px-3 py-1.5 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-600 dark:text-purple-300 border border-purple-500/30 whitespace-nowrap">
+                    {t('home_leaderboard_your_rank', { rank: currentUserRank.rank })}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setLeaderboardOpen(false)}
+                  className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-zinc-800 hover:text-gray-900 dark:hover:text-white transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Points breakdown */}
+            <div className="px-6 py-3 bg-gray-50 dark:bg-zinc-950/50 border-b border-gray-200 dark:border-zinc-800 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-600 dark:text-gray-400">
+              <span className="font-semibold text-gray-700 dark:text-gray-300">
+                {t('home_points_breakdown_title')}:
+              </span>
+              <span>{t('home_points_breakdown_quizzes')} · <b className="text-purple-500">+35</b></span>
+              <span>{t('home_points_breakdown_completed')} · <b className="text-blue-500">+10</b></span>
+              <span>{t('home_points_breakdown_exam_base')} · <b className="text-pink-500">+10</b></span>
+              <span>{t('home_points_breakdown_exam_bonus')}</span>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto">
+              {loadingLeaderboard ? (
+                <div className="flex items-center justify-center py-16 text-gray-500 dark:text-gray-400 text-sm">
+                  <Loader className="w-4 h-4 mr-2 animate-spin" />
+                  {t('home_leaderboard_loading')}
+                </div>
+              ) : leaderboard.length === 0 ? (
+                <div className="py-16 text-center text-sm text-gray-500 dark:text-gray-400">
+                  {t('home_leaderboard_empty')}
+                </div>
+              ) : (
+                <ul className="divide-y divide-gray-100 dark:divide-zinc-800">
+                  {leaderboard.map((entry) => {
+                    const isCurrent = entry.user_id === user?.id;
+                    const displayName =
+                      [entry.first_name, entry.last_name]
+                        .filter(Boolean)
+                        .join(' ')
+                        .trim() ||
+                      entry.email?.split('@')[0] ||
+                      'User';
+                    const initial = (entry.first_name || entry.email || '?')
+                      .charAt(0)
+                      .toUpperCase();
+                    const RankIcon =
+                      entry.rank === 1
+                        ? Crown
+                        : entry.rank === 2 || entry.rank === 3
+                        ? Medal
+                        : null;
+                    const rankColor =
+                      entry.rank === 1
+                        ? 'text-yellow-500'
+                        : entry.rank === 2
+                        ? 'text-gray-400'
+                        : entry.rank === 3
+                        ? 'text-orange-500'
+                        : 'text-gray-500 dark:text-gray-400';
+                    return (
+                      <li
+                        key={entry.user_id}
+                        className={`flex items-center gap-4 px-6 py-3 transition-colors ${
+                          isCurrent
+                            ? 'bg-purple-50 dark:bg-purple-500/10'
+                            : 'hover:bg-gray-50 dark:hover:bg-zinc-950/50'
+                        }`}
+                      >
+                        <div
+                          className={`w-8 flex items-center justify-center font-bold ${rankColor}`}
+                        >
+                          {RankIcon ? (
+                            <RankIcon className="w-5 h-5" />
+                          ) : (
+                            <span className="text-sm">{entry.rank}</span>
+                          )}
+                        </div>
+                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-white text-sm font-bold overflow-hidden flex-shrink-0">
+                          {entry.avatar_url ? (
+                            <img
+                              src={entry.avatar_url}
+                              alt={displayName}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            initial
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-gray-900 dark:text-white truncate">
+                              {displayName}
+                            </span>
+                            {isCurrent && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-purple-500 text-white font-semibold">
+                                {t('home_leaderboard_you')}
+                              </span>
+                            )}
+                          </div>
+                          {entry.university && (
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                              {entry.university}
+                            </p>
+                          )}
+                        </div>
+                        <div className="hidden sm:flex items-center gap-3 text-[11px] text-gray-500 dark:text-gray-400">
+                          <span title={t('home_stat_quizzes_label')}>
+                            <Brain className="w-3.5 h-3.5 inline mr-0.5" />
+                            {entry.quiz_count}
+                          </span>
+                          <span title={t('home_stat_exams_label')}>
+                            <GraduationCap className="w-3.5 h-3.5 inline mr-0.5" />
+                            {entry.exam_attempts}
+                          </span>
+                          <span title={t('home_stat_total_pdfs_label')}>
+                            <FileCheck2 className="w-3.5 h-3.5 inline mr-0.5" />
+                            {entry.completed_pdfs}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-lg font-bold text-gray-900 dark:text-white tabular-nums">
+                            {entry.learning_points}
+                          </p>
+                          <p className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                            {t('home_leaderboard_col_points')}
+                          </p>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              {/* Current user row if outside top N */}
+              {currentUserRank &&
+                !leaderboard.some((e) => e.user_id === currentUserRank.user_id) && (
+                  <div className="border-t-2 border-dashed border-gray-200 dark:border-zinc-800 px-6 py-3 flex items-center gap-4 bg-purple-50 dark:bg-purple-500/10">
+                    <div className="w-8 text-center font-bold text-sm text-gray-500 dark:text-gray-400">
+                      {currentUserRank.rank}
+                    </div>
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-white text-sm font-bold">
+                      {(currentUserRank.first_name || currentUserRank.email || '?')
+                        .charAt(0)
+                        .toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-gray-900 dark:text-white truncate">
+                          {[currentUserRank.first_name, currentUserRank.last_name]
+                            .filter(Boolean)
+                            .join(' ') || currentUserRank.email?.split('@')[0]}
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-purple-500 text-white font-semibold">
+                          {t('home_leaderboard_you')}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-bold text-gray-900 dark:text-white tabular-nums">
+                        {currentUserRank.learning_points}
+                      </p>
+                    </div>
+                  </div>
+                )}
             </div>
           </motion.div>
         </div>
