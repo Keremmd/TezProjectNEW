@@ -13,7 +13,8 @@ import {
   X,
   Loader,
   Network,
-  Maximize2
+  Maximize2,
+  RotateCcw
 } from 'lucide-react';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -108,6 +109,36 @@ const PDFViewerPage = () => {
     }
   };
 
+  // Build the initial welcome message for the AI chat based on the current PDF.
+  const buildWelcomeMessage = () => {
+    if (!pdf) return null;
+    const title = pdf.file_name || 'this PDF';
+    const course = pdf.course_name || '';
+    const intro = course
+      ? t('pdf_ai_welcome_with_course', { title, course })
+      : t('pdf_ai_welcome_without_course', { title });
+    return { id: 'welcome', sender: 'ai', text: intro };
+  };
+
+  // Reset the chat to a single welcome message and clear persisted history.
+  const handleClearChat = () => {
+    if (!pdf || !user) return;
+    if (chatLoading) return;
+    const confirmed = window.confirm(t('pdf_ai_clear_confirm'));
+    if (!confirmed) return;
+
+    const storageKey = `pdf_chat_${user.id}_${pdf.id}`;
+    try {
+      window.localStorage.removeItem(storageKey);
+    } catch (e) {
+      console.error('Failed to clear PDF chat history from localStorage:', e);
+    }
+
+    const welcome = buildWelcomeMessage();
+    setChatMessages(welcome ? [welcome] : []);
+    setChatInput('');
+  };
+
   // Load persisted chat for this user + PDF, or initialize welcome message
   useEffect(() => {
     if (!pdf || !user) return;
@@ -127,17 +158,8 @@ const PDFViewerPage = () => {
     }
 
     if (chatMessages.length === 0) {
-      const title = pdf.file_name || 'this PDF';
-      const course = pdf.course_name || '';
-      const intro = course
-        ? t('pdf_ai_welcome_with_course', { title, course })
-        : t('pdf_ai_welcome_without_course', { title });
-
-      setChatMessages([{
-        id: 'welcome',
-        sender: 'ai',
-        text: intro
-      }]);
+      const welcome = buildWelcomeMessage();
+      if (welcome) setChatMessages([welcome]);
     }
   }, [pdf, user, t]);
 
@@ -892,13 +914,27 @@ const PDFViewerPage = () => {
                       Highlights
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowNotes((v) => !v)}
-                    className="inline-flex items-center rounded-full border border-gray-300 dark:border-zinc-700 px-3 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-zinc-900 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
-                  >
-                    {showNotes ? 'Hide notes' : 'Notes'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {activeRightTab === 'chat' && chatMessages.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearChat}
+                        disabled={chatLoading}
+                        title={t('pdf_ai_clear_title')}
+                        className="inline-flex items-center gap-1 rounded-full border border-gray-300 dark:border-zinc-700 px-3 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-zinc-900 hover:bg-gray-100 dark:hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        {t('pdf_ai_clear')}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowNotes((v) => !v)}
+                      className="inline-flex items-center rounded-full border border-gray-300 dark:border-zinc-700 px-3 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-zinc-900 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
+                    >
+                      {showNotes ? 'Hide notes' : 'Notes'}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -930,7 +966,7 @@ const PDFViewerPage = () => {
                           }`}
                         >
                           <p className="whitespace-pre-wrap">{msg.text}</p>
-                          {msg.sender === 'ai' && msg.ragUsed && msg.sources && msg.sources.length > 0 && (
+                          {msg.sender === 'ai' && msg.sources && msg.sources.length > 0 && (
                             <div className="mt-2 pt-2 border-t border-gray-200 dark:border-zinc-700 flex flex-wrap items-center gap-1.5">
                               <span className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
                                 Kaynak:

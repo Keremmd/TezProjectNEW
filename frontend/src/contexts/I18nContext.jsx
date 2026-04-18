@@ -79,6 +79,10 @@ const MESSAGES = {
     pdf_ai_sending: 'Sending...',
     pdf_ai_error_generic:
       'Sorry, there was an error while answering this question. Please try again in a moment.',
+    pdf_ai_clear: 'Clear chat',
+    pdf_ai_clear_title: 'Clear the conversation history for this PDF',
+    pdf_ai_clear_confirm:
+      'Are you sure you want to clear the entire chat history for this PDF? This cannot be undone.',
 
     // PDF viewer – Mind Map
     mindmap_tab: 'Mind Map',
@@ -323,6 +327,10 @@ const MESSAGES = {
     pdf_ai_sending: 'Gönderiliyor...',
     pdf_ai_error_generic:
       'Üzgünüm, bu soruya yanıt verirken bir hata oluştu. Lütfen biraz sonra tekrar dene.',
+    pdf_ai_clear: 'Sohbeti temizle',
+    pdf_ai_clear_title: 'Bu PDF için sohbet geçmişini sıfırla',
+    pdf_ai_clear_confirm:
+      'Bu PDF\'e ait tüm sohbet geçmişini silmek istediğinden emin misin? Bu işlem geri alınamaz.',
 
     // PDF viewer – Kavram Haritası
     mindmap_tab: 'Harita',

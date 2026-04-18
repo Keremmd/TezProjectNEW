@@ -267,9 +267,149 @@ router.get('/pdf/ingest/status', async (req, res) => {
 });
 
 /**
+ * Detect whether the user's question is page-specific (e.g. "ilk 5 sayfayı
+ * anlat", "3. sayfada ne var", "last 2 pages"). When it is, we bypass
+ * semantic search because RAG retrieves chunks by meaning, not by page index,
+ * and would return semantically similar but positionally wrong pages.
+ *
+ * @param {string} question
+ * @returns {null | { type: 'first_n' | 'last_n' | 'specific' | 'range', n?: number, pages?: number[], from?: number, to?: number }}
+ */
+function detectPageQuery(question) {
+  // Turkish-locale lowercasing so "İ" becomes "i" (not "i" + combining dot),
+  // which would break our regex patterns.
+  const q = (question || '').toLocaleLowerCase('tr-TR');
+  let m;
+
+  // "ilk N sayfa" / "first N pages"
+  m = q.match(/ilk\s*(\d+)\s*sayfa/);
+  if (m) return { type: 'first_n', n: parseInt(m[1], 10) };
+  m = q.match(/first\s*(\d+)\s*pages?/);
+  if (m) return { type: 'first_n', n: parseInt(m[1], 10) };
+
+  // "son N sayfa" / "last N pages"
+  m = q.match(/son\s*(\d+)\s*sayfa/);
+  if (m) return { type: 'last_n', n: parseInt(m[1], 10) };
+  m = q.match(/last\s*(\d+)\s*pages?/);
+  if (m) return { type: 'last_n', n: parseInt(m[1], 10) };
+
+  // "sayfa X-Y arası" / "X-Y arası sayfa" / "pages X-Y" / "pages X to Y"
+  m = q.match(/(\d+)\s*[-–]\s*(\d+)\s*(?:arası\s*)?sayfa/);
+  if (m) return { type: 'range', from: parseInt(m[1], 10), to: parseInt(m[2], 10) };
+  m = q.match(/sayfa\s*(\d+)\s*[-–]\s*(\d+)/);
+  if (m) return { type: 'range', from: parseInt(m[1], 10), to: parseInt(m[2], 10) };
+  m = q.match(/pages?\s*(\d+)\s*(?:-|–|to)\s*(\d+)/);
+  if (m) return { type: 'range', from: parseInt(m[1], 10), to: parseInt(m[2], 10) };
+
+  // "X. sayfa" / "X.sayfa" / "X sayfada" / "X'inci sayfa"
+  m = q.match(/\b(\d+)\s*[.,]?\s*(?:nci|ncı|nca|ıncı|üncü|uncu)?\s*sayfa/);
+  if (m) return { type: 'specific', pages: [parseInt(m[1], 10)] };
+
+  // "sayfa X" / "sayfada X" / "page X"
+  m = q.match(/sayfa(?:da|daki|sında)?\s*(\d+)/);
+  if (m) return { type: 'specific', pages: [parseInt(m[1], 10)] };
+  m = q.match(/\bpage\s*(\d+)/);
+  if (m) return { type: 'specific', pages: [parseInt(m[1], 10)] };
+
+  return null;
+}
+
+/**
+ * Detect summary-style questions that want a high-level overview of the
+ * entire document, not a semantic look-up of a specific concept.
+ */
+function detectSummaryQuery(question) {
+  const q = (question || '').toLocaleLowerCase('tr-TR');
+  return (
+    /özetle|özet\s*(ver|yap|çıkar|çıkart)|özeti\s*nedir|özet\s*geç|tl;?dr/i.test(q) ||
+    /ne(\s*den|den)?\s*bahsediyor|neden\s*bahsediyor|ne\s*anlat(ıy|ı|i)or|konu(su)?\s*ne(dir)?|genel\s*(olarak|bilgi)|ana\s*(konular|başlıklar|fikir|fikri|hatlar(ıyla)?)|ana\s*(amac|hedef)/i.test(q) ||
+    /\bsummary\b|\bsummarize\b|\bwhat(?:'s|\s*is)\s*(?:this|the|it)?\s*(?:pdf|document|about)\b|\bmain\s*(?:topics?|ideas?|points?)\b|\btl;?dr\b/i.test(q)
+  );
+}
+
+/**
+ * Given the per-page text array and a page query, pick the pages the user
+ * asked about and format them as a [p.X] annotated context string.
+ */
+function buildPageContext(pages, pageQuery, maxChars = 28000) {
+  if (!Array.isArray(pages) || pages.length === 0) return { text: '', selectedPages: [] };
+  const totalPages = pages.length;
+  let selectedPages = [];
+
+  if (pageQuery.type === 'first_n') {
+    const n = Math.max(1, Math.min(totalPages, pageQuery.n || 1));
+    selectedPages = pages.slice(0, n);
+  } else if (pageQuery.type === 'last_n') {
+    const n = Math.max(1, Math.min(totalPages, pageQuery.n || 1));
+    selectedPages = pages.slice(totalPages - n);
+  } else if (pageQuery.type === 'range') {
+    const from = Math.max(1, Math.min(totalPages, pageQuery.from));
+    const to = Math.max(from, Math.min(totalPages, pageQuery.to));
+    selectedPages = pages.filter((p) => p.page >= from && p.page <= to);
+  } else if (pageQuery.type === 'specific') {
+    const wanted = new Set(
+      (pageQuery.pages || [])
+        .map((n) => Math.max(1, Math.min(totalPages, Number(n) || 0)))
+        .filter(Boolean)
+    );
+    selectedPages = pages.filter((p) => wanted.has(p.page));
+  }
+
+  if (selectedPages.length === 0) return { text: '', selectedPages: [] };
+
+  let used = 0;
+  const parts = [];
+  for (const p of selectedPages) {
+    const raw = (p.text || '').trim();
+    if (!raw) continue;
+    const remaining = maxChars - used;
+    if (remaining <= 200) break;
+    const slice = raw.length > remaining ? raw.slice(0, remaining) : raw;
+    const block = `[p.${p.page}] ${slice}`;
+    parts.push(block);
+    used += block.length + 2;
+  }
+  return {
+    text: parts.join('\n\n'),
+    selectedPages: selectedPages.map((p) => p.page),
+  };
+}
+
+/**
+ * For summary queries, build a context that samples the document evenly so
+ * the model sees the whole story, not just the first N chars (which would
+ * miss the conclusion of long PDFs).
+ */
+function buildSummaryContext(pages, pdfText, maxChars = 26000) {
+  if (Array.isArray(pages) && pages.length > 0) {
+    // Evenly distribute a character budget across pages.
+    const perPage = Math.max(300, Math.floor(maxChars / Math.min(pages.length, 30)));
+    const parts = [];
+    let used = 0;
+    for (const p of pages) {
+      if (used >= maxChars) break;
+      const raw = (p.text || '').trim();
+      if (!raw) continue;
+      const remaining = maxChars - used;
+      const slice = raw.slice(0, Math.min(perPage, remaining));
+      const block = `[p.${p.page}] ${slice}`;
+      parts.push(block);
+      used += block.length + 2;
+    }
+    if (parts.length > 0) return parts.join('\n\n');
+  }
+  return (pdfText || '').substring(0, maxChars);
+}
+
+/**
  * POST /api/analyze/pdf/ask
  * Answer a user's question about a specific PDF using Gemini,
  * strictly grounded in that PDF's content.
+ *
+ * Strategy:
+ *   1. Page-specific query ("ilk 5 sayfa", "3. sayfa") → use those exact pages.
+ *   2. Summary query ("özetle", "ne anlatıyor") → use evenly-sampled overview.
+ *   3. Otherwise → RAG (semantic search over pre-computed chunks).
  */
 router.post('/pdf/ask', async (req, res) => {
   try {
@@ -281,7 +421,56 @@ router.post('/pdf/ask', async (req, res) => {
 
     console.log(`💬 [Chat] Question for pdf ${pdfId}: ${question.slice(0, 100)}`);
 
-    // Try RAG first. If the PDF hasn't been indexed yet, index it lazily.
+    const pageQuery = detectPageQuery(question);
+    const isSummary = !pageQuery && detectSummaryQuery(question);
+
+    // --- Path 1: page-specific OR summary — skip RAG, use exact context. ---
+    if (pageQuery || isSummary) {
+      const { pdfText, pages } = await loadPdfWithPages(pdfId);
+
+      let context;
+      let strategy;
+      let selectedPages = [];
+
+      if (pageQuery) {
+        const built = buildPageContext(pages, pageQuery);
+        context = built.text;
+        selectedPages = built.selectedPages;
+        strategy = `page:${pageQuery.type}`;
+        console.log(
+          `📖 [Chat] Page-specific query (${pageQuery.type}), selected pages: ${selectedPages.join(', ') || '∅'}`
+        );
+
+        if (!context) {
+          // The requested pages don't exist in the PDF — tell the user nicely.
+          return res.json({
+            success: true,
+            answer:
+              'İstediğin sayfalar bu PDF\'te bulunamadı. Lütfen geçerli bir sayfa numarası belirt.',
+            rag: { used: false, strategy, pages: [] },
+          });
+        }
+      } else {
+        context = buildSummaryContext(pages, pdfText);
+        strategy = 'summary';
+        console.log(`📖 [Chat] Summary query, using evenly-sampled ${context.length} chars`);
+      }
+
+      const answer = await answerQuestionAboutPDF(context, question, {
+        isRetrieved: true,
+        retrievalNote: pageQuery
+          ? 'Aşağıda, kullanıcının istediği sayfa(lar)ın tam metni [p.X] olarak verilmiştir. Sadece bu sayfalara dayanarak cevap ver.'
+          : 'Aşağıda PDF\'in genelinden dengeli şekilde örneklenmiş bölümler [p.X] sayfa etiketleriyle verilmiştir.',
+      });
+
+      return res.json({
+        success: true,
+        answer,
+        rag: { used: false, strategy, pages: selectedPages },
+      });
+    }
+
+    // --- Path 2: concept query → RAG (semantic search). ---
     let indexed = await isPdfIndexed(pdfId);
     if (!indexed) {
       try {
@@ -337,6 +526,7 @@ router.post('/pdf/ask', async (req, res) => {
       answer,
       rag: {
         used: usedRag,
+        strategy: usedRag ? 'rag' : 'fallback',
         pages: retrievedPages,
       },
     });

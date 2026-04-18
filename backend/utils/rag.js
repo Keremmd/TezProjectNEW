@@ -7,26 +7,53 @@ dotenv.config();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 /**
- * Embedding models, tried in order. Both return 768-dim vectors, matching
+ * Embedding models, tried in order. Output is forced to 768 dims to match
  * our pdf_chunks.embedding (vector(768)) column.
  *
- * - `text-embedding-004` is the newer (GA) model.
- * - `embedding-001` is the older, widely-available fallback.
- *
- * Some `@google/generative-ai` SDK versions or API regions only recognize
- * one or the other, so we probe on first use and cache the working one.
+ * As of Apr 2026, the older `text-embedding-004` / `embedding-001` endpoints
+ * return 404 on v1beta. The current GA model is `gemini-embedding-001`,
+ * which natively returns 3072 dims but supports Matryoshka truncation to
+ * 768 via the `outputDimensionality` parameter. We re-normalize the
+ * truncated vector to unit length (required for cosine similarity after MRL
+ * truncation).
  *
  * Rate limits (free tier): ~1500 req/min, up to 100 items per batch.
  */
 const EMBED_MODEL_CANDIDATES =
   (process.env.GEMINI_EMBED_MODEL ? [process.env.GEMINI_EMBED_MODEL] : []).concat([
+    'gemini-embedding-001',
+    'gemini-embedding-2-preview',
+    // Legacy fallbacks — kept for keys/regions where they still work.
     'text-embedding-004',
     'embedding-001',
   ]);
 const EMBED_DIM = 768;
 
+/**
+ * L2-normalize a vector in place. Needed after truncating a Matryoshka
+ * embedding to a lower dimension so cosine similarity stays meaningful.
+ */
+function normalizeVector(vec) {
+  if (!Array.isArray(vec) || vec.length === 0) return vec;
+  let sumSq = 0;
+  for (const v of vec) sumSq += v * v;
+  const norm = Math.sqrt(sumSq);
+  if (!norm || !isFinite(norm)) return vec;
+  for (let i = 0; i < vec.length; i++) vec[i] = vec[i] / norm;
+  return vec;
+}
+
 let _resolvedEmbedModelName = null;
 let _resolvedEmbedModel = null;
+
+/**
+ * Check whether a given model name needs outputDimensionality=768 to match
+ * our pgvector(768) schema. gemini-embedding-* defaults to 3072; the legacy
+ * models already return 768 natively.
+ */
+function modelNeedsTruncation(name) {
+  return /^gemini-embedding/i.test(name || '');
+}
 
 async function probeEmbedModel() {
   if (_resolvedEmbedModel) return _resolvedEmbedModel;
@@ -34,11 +61,21 @@ async function probeEmbedModel() {
   for (const name of EMBED_MODEL_CANDIDATES) {
     try {
       const model = genAI.getGenerativeModel({ model: name });
-      // Small probe to check the model is reachable for embedContent.
-      await model.embedContent({
+      const probePayload = {
         content: { parts: [{ text: 'ping' }], role: 'user' },
-      });
-      console.log(`🧬 [RAG] Using embedding model: ${name}`);
+      };
+      if (modelNeedsTruncation(name)) {
+        probePayload.outputDimensionality = EMBED_DIM;
+      }
+      const probeRes = await model.embedContent(probePayload);
+      const dim = probeRes?.embedding?.values?.length;
+      if (dim && dim !== EMBED_DIM) {
+        console.warn(
+          `⚠️ [RAG] Model "${name}" returned ${dim}-dim vector but DB expects ${EMBED_DIM}, skipping.`
+        );
+        continue;
+      }
+      console.log(`🧬 [RAG] Using embedding model: ${name} (${EMBED_DIM}-dim)`);
       _resolvedEmbedModelName = name;
       _resolvedEmbedModel = model;
       return model;
@@ -148,14 +185,17 @@ export function chunkPages(pages, options = {}) {
 export async function embedText(text, options = {}) {
   const { taskType = 'RETRIEVAL_DOCUMENT', title = null } = options;
   const model = await probeEmbedModel();
+  const needsTrunc = modelNeedsTruncation(_resolvedEmbedModelName);
   const payload = {
     content: { parts: [{ text }], role: 'user' },
     taskType,
   };
   if (title && taskType === 'RETRIEVAL_DOCUMENT') payload.title = title;
+  if (needsTrunc) payload.outputDimensionality = EMBED_DIM;
   try {
     const res = await model.embedContent(payload);
-    return res.embedding?.values || [];
+    const values = res.embedding?.values || [];
+    return needsTrunc ? normalizeVector(values) : values;
   } catch (err) {
     // If this model silently broke after probe (rare), clear cache and retry once.
     const msg = String(err?.message || '');
@@ -163,8 +203,13 @@ export async function embedText(text, options = {}) {
       _resolvedEmbedModel = null;
       _resolvedEmbedModelName = null;
       const retryModel = await probeEmbedModel();
-      const res = await retryModel.embedContent(payload);
-      return res.embedding?.values || [];
+      const retryNeedsTrunc = modelNeedsTruncation(_resolvedEmbedModelName);
+      const retryPayload = { ...payload };
+      if (retryNeedsTrunc) retryPayload.outputDimensionality = EMBED_DIM;
+      else delete retryPayload.outputDimensionality;
+      const res = await retryModel.embedContent(retryPayload);
+      const values = res.embedding?.values || [];
+      return retryNeedsTrunc ? normalizeVector(values) : values;
     }
     throw err;
   }
@@ -181,20 +226,28 @@ export async function embedText(text, options = {}) {
 export async function embedBatch(texts, options = {}) {
   const { taskType = 'RETRIEVAL_DOCUMENT', batchSize = 80, retries = 3 } = options;
   let model = await probeEmbedModel();
+  let needsTrunc = modelNeedsTruncation(_resolvedEmbedModelName);
   const out = [];
 
   for (let i = 0; i < texts.length; i += batchSize) {
     const batch = texts.slice(i, i + batchSize);
-    const requests = batch.map((text) => ({
-      content: { parts: [{ text }], role: 'user' },
-      taskType,
-    }));
+    const requests = batch.map((text) => {
+      const req = {
+        content: { parts: [{ text }], role: 'user' },
+        taskType,
+      };
+      if (needsTrunc) req.outputDimensionality = EMBED_DIM;
+      return req;
+    });
 
     let lastError;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         const res = await model.batchEmbedContents({ requests });
-        const embeddings = (res.embeddings || []).map((e) => e.values || []);
+        const embeddings = (res.embeddings || []).map((e) => {
+          const v = e.values || [];
+          return needsTrunc ? normalizeVector(v.slice()) : v;
+        });
         if (embeddings.length !== batch.length) {
           throw new Error(
             `Embedding count mismatch (expected ${batch.length}, got ${embeddings.length})`
@@ -213,6 +266,12 @@ export async function embedBatch(texts, options = {}) {
           _resolvedEmbedModelName = null;
           try {
             model = await probeEmbedModel();
+            needsTrunc = modelNeedsTruncation(_resolvedEmbedModelName);
+            // Rebuild this batch's requests with the new model's truncation mode.
+            for (const req of requests) {
+              if (needsTrunc) req.outputDimensionality = EMBED_DIM;
+              else delete req.outputDimensionality;
+            }
             continue;
           } catch (probeErr) {
             throw probeErr;
