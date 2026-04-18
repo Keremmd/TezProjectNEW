@@ -4,6 +4,7 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import { useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
 import { supabase } from '../lib/supabase';
+import { API_URL } from '../lib/api';
 import {
   ChevronLeft,
   ChevronRight,
@@ -383,7 +384,7 @@ const PDFViewerPage = () => {
     setGlossaryLoading(true);
     setGlossaryError(null);
     try {
-      const response = await fetch('http://localhost:3001/api/analyze/pdf/glossary', {
+      const response = await fetch(`${API_URL}/api/analyze/pdf/glossary`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pdfId: pdf.id })
@@ -407,7 +408,7 @@ const PDFViewerPage = () => {
     setMindmapLoading(true);
     setMindmapError(null);
     try {
-      const response = await fetch('http://localhost:3001/api/analyze/pdf/mindmap', {
+      const response = await fetch(`${API_URL}/api/analyze/pdf/mindmap`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -437,7 +438,7 @@ const PDFViewerPage = () => {
     (async () => {
       try {
         const resp = await fetch(
-          `http://localhost:3001/api/analyze/pdf/mindmap?pdfId=${encodeURIComponent(pdf.id)}`
+          `${API_URL}/api/analyze/pdf/mindmap?pdfId=${encodeURIComponent(pdf.id)}`
         );
         const data = await resp.json();
         if (cancelled) return;
@@ -462,14 +463,14 @@ const PDFViewerPage = () => {
     (async () => {
       try {
         const statusResp = await fetch(
-          `http://localhost:3001/api/analyze/pdf/ingest/status?pdfId=${encodeURIComponent(pdf.id)}`
+          `${API_URL}/api/analyze/pdf/ingest/status?pdfId=${encodeURIComponent(pdf.id)}`
         );
         const status = await statusResp.json();
         if (cancelled) return;
         if (status?.indexed) return;
         console.log('🔍 [RAG] PDF not indexed, ingesting in background...');
         const resp = await fetch(
-          'http://localhost:3001/api/analyze/pdf/ingest',
+          `${API_URL}/api/analyze/pdf/ingest`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -697,7 +698,7 @@ const PDFViewerPage = () => {
     setChatLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/analyze/pdf/ask', {
+      const response = await fetch(`${API_URL}/api/analyze/pdf/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pdfId: pdf.id, question: trimmed })

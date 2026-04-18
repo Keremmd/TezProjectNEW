@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
+import { API_URL } from '../lib/api';
 
 const TYPE_LABELS_TR = {
   mcq: 'Çoktan Seçmeli',
@@ -90,7 +91,7 @@ export default function ExamPage() {
     (async () => {
       try {
         setLoading(true);
-        const resp = await fetch(`http://localhost:3001/api/exam/${id}`);
+        const resp = await fetch(`${API_URL}/api/exam/${id}`);
         const data = await resp.json();
         if (cancelled) return;
         if (!resp.ok || !data.success) {
@@ -149,7 +150,7 @@ export default function ExamPage() {
       const timeTakenSeconds = startedAt
         ? Math.round((Date.now() - startedAt) / 1000)
         : null;
-      const resp = await fetch(`http://localhost:3001/api/exam/${id}/submit`, {
+      const resp = await fetch(`${API_URL}/api/exam/${id}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -163,7 +164,7 @@ export default function ExamPage() {
         throw new Error(data.error || data.message || 'Sınav gönderilemedi');
       }
       // Re-fetch with reveal=true so correct answers show
-      const revealResp = await fetch(`http://localhost:3001/api/exam/${id}?reveal=true`);
+      const revealResp = await fetch(`${API_URL}/api/exam/${id}?reveal=true`);
       const revealData = await revealResp.json();
       if (revealResp.ok && revealData.success) {
         setQuestions(revealData.questions || []);

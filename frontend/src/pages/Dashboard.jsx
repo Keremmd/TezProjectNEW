@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { API_URL } from '../lib/api';
 import { useI18n } from '../contexts/I18nContext';
 import {
   Upload,
@@ -910,7 +911,7 @@ const Dashboard = () => {
       const params = new URLSearchParams({ limit: '10' });
       if (user?.id) params.set('userId', user.id);
       const res = await fetch(
-        `http://localhost:3001/api/leaderboard?${params.toString()}`
+        `${API_URL}/api/leaderboard?${params.toString()}`
       );
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -995,7 +996,7 @@ const Dashboard = () => {
 
     setGeneratingExam(true);
     try {
-      const response = await fetch('http://localhost:3001/api/exam/generate', {
+      const response = await fetch(`${API_URL}/api/exam/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1109,7 +1110,7 @@ const Dashboard = () => {
     });
 
     // Create deck in background
-    fetch('http://localhost:3001/api/flashcards/generate', {
+    fetch(`${API_URL}/api/flashcards/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1229,7 +1230,7 @@ const Dashboard = () => {
     setCreatingQuiz(true);
     
     // Create quiz in background
-    fetch('http://localhost:3001/api/quiz/generate', {
+    fetch(`${API_URL}/api/quiz/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(quizData)
